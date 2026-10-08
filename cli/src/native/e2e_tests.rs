@@ -1155,6 +1155,21 @@ async fn e2e_lightpanda_screenshot_renderers() {
         }
     }
 
+    for (id, renderer, expected) in [
+        ("pdf1", "chrome", "chrome"),
+        ("pdf2", "native", "lightpanda-text"),
+    ] {
+        let path = dir.path().join(format!("{id}.pdf"));
+        let resp = execute_command(
+            &json!({ "id": id, "action": "pdf", "path": path.to_str().unwrap(), "renderer": renderer }),
+            &mut state,
+        )
+        .await;
+        assert_success(&resp);
+        assert_eq!(get_data(&resp)["renderer"], expected);
+        assert!(std::fs::read(&path).unwrap().starts_with(b"%PDF-"));
+    }
+
     // Render markers never leak into the live Lightpanda DOM.
     let resp = execute_command(
         &json!({

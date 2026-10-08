@@ -205,6 +205,15 @@ Choose the renderer with `--screenshot-renderer <mode>`, the `AGENT_BROWSER_SCRE
 }
 ```
 
+### PDFs
+
+PDFs use the same path: with Lightpanda, `agent-browser pdf` sends the serialized page to the renderer, which prints it with Chrome's `Page.printToPDF`, so the PDF keeps the page's layout and styles. `--screenshot-renderer` applies to both, `native` produces Lightpanda's own text-only PDF (selectable text and links, no CSS), and `--json` reports `data.renderer`. A renderer service from before PDF support returns an error instead of a PDF; update it.
+
+```bash
+agent-browser pdf page.pdf                                   # Rendered by Chrome, keeps layout
+agent-browser --screenshot-renderer native pdf text.pdf      # Lightpanda text-only PDF
+```
+
 ### Domain allowlist and proxy
 
 While `--allowed-domains` is active, Chrome rendering of Lightpanda screenshots is disabled, because the renderer would load page subresources outside the domain filter. In that case `auto` uses the native Lightpanda text render, and `chrome` or a renderer URL returns an error suggesting `--screenshot-renderer native` or `--engine chrome`.

@@ -20,6 +20,10 @@
       {
         "from": "# Browser engine: chrome (default), lightpanda, obscura (experimental)",
         "to": "# Browser engine: lightpanda (default, falls back to chrome when unavailable), chrome, obscura (experimental)"
+      },
+      {
+        "from": "agent-browser pdf <path>              # Save page as PDF",
+        "to": "agent-browser pdf <path>              # Save page as PDF\nagent-browser --screenshot-renderer native pdf <path>  # Lightpanda text-only PDF"
       }
     ],
     "/configuration": [

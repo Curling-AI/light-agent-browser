@@ -35,6 +35,7 @@ agent-browser screenshot --screenshot-dir ./shots    # Save to custom directory
 agent-browser screenshot --screenshot-format jpeg --screenshot-quality 80
 agent-browser --screenshot-renderer chrome screenshot  # Choose the Lightpanda screenshot renderer
 agent-browser pdf <path>              # Save page as PDF
+agent-browser --screenshot-renderer native pdf <path>  # Lightpanda text-only PDF
 agent-browser snapshot                # Accessibility tree with refs
 agent-browser eval <js>               # Run JavaScript
 agent-browser connect <port|url>      # Connect to browser via CDP

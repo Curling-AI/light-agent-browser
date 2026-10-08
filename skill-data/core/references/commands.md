@@ -122,7 +122,7 @@ Headless Chromium screenshots hide native scrollbars for consistent image output
 
 ### Lightpanda screenshots
 
-Lightpanda (the default engine) has no layout engine. agent-browser serializes the current DOM (scripts removed, form values and CSSOM styles kept, passwords masked) with the page cookies, viewport, scroll position, and color scheme, then renders it in Chrome at the original URL. Selector, `--full`, `--annotate`, and JPEG screenshots all work.
+Lightpanda (the default engine) has no layout engine. agent-browser serializes the current DOM (scripts removed, form values and CSSOM styles kept, passwords masked) with the page cookies, viewport, scroll position, and color scheme, then renders it in Chrome at the original URL. Selector, `--full`, `--annotate`, and JPEG screenshots all work. `agent-browser pdf` goes through the same renderer and keeps the page's layout; `--screenshot-renderer native` gives Lightpanda's text-only PDF.
 
 ```bash
 agent-browser screenshot page.png                                  # auto: local Chrome if installed, else native

@@ -136,10 +136,20 @@ pub struct RenderRequest {
     /// Upper bound for subresource loading, in milliseconds.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// `screenshot` (default) or `pdf`.
+    #[serde(default = "default_output")]
+    pub output: String,
+    /// `Page.printToPDF` parameters when `output` is `pdf`.
+    #[serde(default)]
+    pub pdf: Option<Value>,
 }
 
 fn default_format() -> String {
     "png".to_string()
+}
+
+fn default_output() -> String {
+    "screenshot".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,14 +255,46 @@ pub async fn capture_screenshot(
         return Ok((native().await?, RenderedBy::Engine));
     }
 
+    let Some((rendered_by, remote_url)) = select_renderer(ctx, mode)? else {
+        if options.format != "png" {
+            return Err(
+                "Lightpanda's text render only produces PNG. Use --screenshot-format png, or a Chrome renderer (--screenshot-renderer chrome or a renderer URL)."
+                    .to_string(),
+            );
+        }
+        return Ok((native().await?, RenderedBy::LightpandaText));
+    };
+
+    let request = build_render_request(ctx, options).await?;
+    let response = dispatch(renderer, ctx, rendered_by, remote_url, &request).await?;
+
+    let annotations = response
+        .annotations
+        .iter()
+        .filter_map(annotation_from_value)
+        .collect();
+    Ok((
+        ScreenshotResult {
+            base64: response.data,
+            annotations,
+        },
+        rendered_by,
+    ))
+}
+
+/// Chooses the renderer for a Lightpanda capture; `None` means Lightpanda's
+/// own text-only output.
+fn select_renderer<'m>(
+    ctx: &CaptureContext<'_>,
+    mode: &'m RendererMode,
+) -> Result<Option<(RenderedBy, &'m str)>, String> {
     if ctx.domain_filter_active && !matches!(mode, RendererMode::Native | RendererMode::Auto) {
         return Err(
-            "Chrome screenshot rendering is disabled while --allowed-domains is active, because the renderer would load page resources outside the filter. Use --screenshot-renderer native or --engine chrome."
+            "Chrome rendering is disabled while --allowed-domains is active, because the renderer would load page resources outside the filter. Use --screenshot-renderer native or --engine chrome."
                 .to_string(),
         );
     }
-
-    let target = match mode {
+    Ok(match mode {
         RendererMode::Native => None,
         RendererMode::Auto if ctx.domain_filter_active => None,
         RendererMode::Remote(url) => Some((RenderedBy::Remote, url.as_str())),
@@ -268,38 +310,68 @@ pub async fn capture_screenshot(
         RendererMode::Auto => {
             super::cdp::chrome::find_chrome().map(|_| (RenderedBy::LocalChrome, ""))
         }
-    };
+    })
+}
 
-    let Some((rendered_by, remote_url)) = target else {
-        if options.format != "png" {
-            return Err(
-                "Lightpanda's text render only produces PNG. Use --screenshot-format png, or a Chrome renderer (--screenshot-renderer chrome or a renderer URL)."
-                    .to_string(),
-            );
-        }
-        return Ok((native().await?, RenderedBy::LightpandaText));
-    };
-
-    let request = build_render_request(ctx, options).await?;
-    let response = match rendered_by {
+async fn dispatch(
+    renderer: &ScreenshotRenderer,
+    ctx: &CaptureContext<'_>,
+    rendered_by: RenderedBy,
+    remote_url: &str,
+    request: &RenderRequest,
+) -> Result<RenderResponse, String> {
+    match rendered_by {
         RenderedBy::Remote => {
-            remote::render(remote_url, ctx.renderer_token.as_deref(), &request).await?
+            remote::render(remote_url, ctx.renderer_token.as_deref(), request).await
         }
-        _ => renderer.render_local(&request).await?,
+        _ => renderer.render_local(request).await,
+    }
+}
+
+/// Prints the page to PDF, routing Lightpanda sessions through a renderer
+/// so the PDF keeps the page's layout and styles. Returns base64 PDF data.
+pub async fn capture_pdf(
+    renderer: &ScreenshotRenderer,
+    ctx: &CaptureContext<'_>,
+    pdf_params: Value,
+    mode: &RendererMode,
+) -> Result<(String, RenderedBy), String> {
+    let print = |params: Value| async move {
+        let result = ctx
+            .client
+            .send_command("Page.printToPDF", Some(params), Some(ctx.session_id))
+            .await?;
+        result
+            .get("data")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .ok_or_else(|| "No PDF data returned".to_string())
     };
 
-    let annotations = response
-        .annotations
-        .iter()
-        .filter_map(annotation_from_value)
-        .collect();
-    Ok((
-        ScreenshotResult {
-            base64: response.data,
-            annotations,
-        },
-        rendered_by,
-    ))
+    if !ctx.engine.eq_ignore_ascii_case("lightpanda") {
+        return Ok((print(pdf_params).await?, RenderedBy::Engine));
+    }
+    let Some((rendered_by, remote_url)) = select_renderer(ctx, mode)? else {
+        return Ok((print(pdf_params).await?, RenderedBy::LightpandaText));
+    };
+
+    let mut request = build_render_request(ctx, &ScreenshotOptions::default()).await?;
+    request.output = "pdf".to_string();
+    request.pdf = Some(pdf_params);
+    let response = dispatch(renderer, ctx, rendered_by, remote_url, &request).await?;
+    if !is_pdf_base64(&response.data) {
+        return Err(
+            "The screenshot renderer did not return a PDF. Update the renderer service to a version that supports PDF output."
+                .to_string(),
+        );
+    }
+    Ok((response.data, rendered_by))
+}
+
+/// Renderers that predate PDF support ignore `output` and return an image.
+fn is_pdf_base64(data: &str) -> bool {
+    // "%PDF-" encodes to "JVBERi0" in base64.
+    data.trim_start().starts_with("JVBERi0")
 }
 
 fn annotation_from_value(value: &Value) -> Option<ScreenshotAnnotation> {
@@ -488,6 +560,8 @@ async fn build_render_request(
         annotate: options.annotate,
         refs,
         timeout_ms: None,
+        output: default_output(),
+        pdf: None,
     })
 }
 
@@ -627,6 +701,31 @@ mod tests {
         let value = serde_json::to_value(&request).unwrap();
         assert_eq!(value["viewport"]["deviceScaleFactor"], 1.0);
         assert_eq!(value["fullPage"], false);
+    }
+
+    #[test]
+    fn pdf_output_round_trips_and_detects_pdf_data() {
+        let request: RenderRequest = serde_json::from_value(json!({
+            "url": "https://example.com/",
+            "html": "<html></html>",
+            "viewport": { "width": 800, "height": 600 },
+            "output": "pdf",
+            "pdf": { "landscape": true }
+        }))
+        .unwrap();
+        assert_eq!(request.output, "pdf");
+        assert_eq!(request.pdf.unwrap()["landscape"], true);
+        let legacy: RenderRequest = serde_json::from_value(json!({
+            "url": "u", "html": "h", "viewport": { "width": 1, "height": 1 }
+        }))
+        .unwrap();
+        assert_eq!(legacy.output, "screenshot");
+
+        use base64::Engine as _;
+        let pdf = base64::engine::general_purpose::STANDARD.encode(b"%PDF-1.7\n...");
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n");
+        assert!(is_pdf_base64(&pdf));
+        assert!(!is_pdf_base64(&png));
     }
 
     #[test]

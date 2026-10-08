@@ -6,7 +6,7 @@ This fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-br
 
 - **Default engine.** Without an explicit `--engine`, local launches use Lightpanda and fall back to Chrome (with a warning) on Windows, when Lightpanda is not installed, with a non-Lightpanda `--executable-path`, or with Chrome-only options. Explicit engines, `--cdp`, `--auto-connect`, and providers behave exactly as upstream.
 - **Install.** `agent-browser install` downloads Lightpanda. `--with-chrome` and `--with-deps` add Chrome; `--engine chrome install` is the upstream behavior.
-- **Screenshots.** Lightpanda pages are rendered by Chrome from a serialized DOM, either in-process or through `agent-browser renderer serve` (`--screenshot-renderer`).
+- **Screenshots and PDFs.** Lightpanda pages are rendered by Chrome from a serialized DOM, either in-process or through `agent-browser renderer serve` (`--screenshot-renderer`).
 
 ## Where the code lives
 
@@ -20,7 +20,7 @@ New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 Upstream files carry small, self-contained hooks:
 
-- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, renderer shutdown on `close`
+- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`
 - `cli/src/native/mod.rs`: module registration
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
@@ -50,7 +50,7 @@ When resolving conflicts, keep upstream's version of a hunk and re-apply the for
 
 - add a new launch path in `actions.rs` (it needs the same `engine::resolve_launch_engine` call)
 - add a Chrome-only launch option (add it to `engine::chrome_only_option`)
-- add a new screenshot entry point (route it through `render::capture_screenshot`)
+- add a new screenshot or PDF entry point (route it through `render::capture_screenshot` or `render::capture_pdf`)
 - change `install.rs` or the Lightpanda launcher
 
 Bump `LIGHTPANDA_VERSION` in `cli/src/lightpanda_install.rs` when adopting a new Lightpanda release.
