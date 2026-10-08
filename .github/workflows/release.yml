@@ -330,10 +330,8 @@ jobs:
         env:
           PACKAGE_NAME: light-agent-browser
           VERSION: ${{ needs.check-release.outputs.version }}
-          # Needed for the first publish of the package. Once npm trusted
-          # publishing is configured for this workflow, the secret can be
-          # removed and OIDC (id-token) is used instead.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Authenticates through npm trusted publishing (OIDC via id-token),
+          # configured on npm for release.yml in the Release environment.
         run: |
           set -euo pipefail
           if pnpm view "${PACKAGE_NAME}@${VERSION}" version >/dev/null 2>&1; then
