@@ -1368,12 +1368,12 @@ fn run_close_all(flags: &Flags) {
     }
 }
 
-/// `agent-browser renderer serve [--host H] [--port P] [--concurrency N]`
+/// `agent-browser renderer serve [--host H] [--port P] [--concurrency N] [--recycle-after N]`
 fn run_renderer(args: &[String], flags: &Flags) {
     let serve_at = args.iter().position(|a| a == "serve");
     let Some(serve_at) = serve_at else {
         eprintln!(
-            "{} Usage: agent-browser renderer serve [--host <host>] [--port <port>] [--concurrency <n>] [--max-body-mb <mb>]",
+            "{} Usage: agent-browser renderer serve [--host <host>] [--port <port>] [--concurrency <n>] [--max-body-mb <mb>] [--recycle-after <n>] [--allow-unauthenticated]",
             color::error_indicator()
         );
         exit(1);

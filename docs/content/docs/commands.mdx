@@ -531,9 +531,10 @@ agent-browser renderer serve                                  # Listen on 127.0.
 agent-browser renderer serve --host 0.0.0.0 --port 9300       # Listen on all interfaces
 agent-browser renderer serve --concurrency 8 --max-body-mb 64 # Tune parallel renders and request size
 agent-browser renderer serve --executable-path /path/to/chrome
+agent-browser renderer serve --recycle-after 500              # Relaunch Chrome less often
 ```
 
-Runs a shared Chrome service that renders screenshots for agents using the Lightpanda engine with `--screenshot-renderer http(s)://host:port`. It serves `POST /v1/render` and `GET /healthz`, and renders each request in an isolated Chrome browser context. When `AGENT_BROWSER_RENDERER_TOKEN` is set, requests must send `Authorization: Bearer <token>`. Requests contain page HTML and cookies, so keep the service on a private network, set a token, and use TLS when traffic leaves the host. See [Remote renderer](/engines/lightpanda#remote-renderer).
+Runs a shared Chrome service that renders screenshots for agents using the Lightpanda engine with `--screenshot-renderer http(s)://host:port`. It serves `POST /v1/render` and `GET /healthz`, and renders each request in an isolated Chrome browser context with page scripts disabled and subresources limited to public http(s) addresses. When `AGENT_BROWSER_RENDERER_TOKEN` is set, requests must send `Authorization: Bearer <token>`; a non-loopback host requires the token unless `--allow-unauthenticated` is passed. Requests contain page HTML and cookies, so keep the service on a private network and use TLS when traffic leaves the host. See [Remote renderer](/engines/lightpanda#remote-renderer).
 
 ## Chat
 

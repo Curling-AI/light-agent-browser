@@ -3215,18 +3215,25 @@ agent-browser renderer serve - Run a shared screenshot renderer
 
 Usage: agent-browser renderer serve [--host <host>] [--port <port>]
                                     [--concurrency <n>] [--max-body-mb <mb>]
+                                    [--recycle-after <n>] [--allow-unauthenticated]
 
 Serves POST /v1/render for agents that use the Lightpanda engine with
 --screenshot-renderer http(s)://host:port, and GET /healthz for probes.
-Each render runs in an isolated Chrome browser context. The renderer
-receives the page HTML and the page cookies, so keep it on a private network
-and require a token.
+Each render runs in an isolated Chrome browser context with page scripts
+disabled, and subresources load only over http(s) from public addresses, so a
+request cannot make the service reach loopback, private, or link-local hosts
+such as cloud metadata endpoints. The renderer receives the page HTML and the
+page cookies: it refuses to listen on a non-loopback address without a token,
+and should stay on a private network.
 
 Options:
   --host <host>          Bind address (default: 127.0.0.1; or AGENT_BROWSER_RENDERER_HOST)
   --port <port>          Port (default: 9300; or AGENT_BROWSER_RENDERER_PORT)
   --concurrency <n>      Parallel renders (default: 4; or AGENT_BROWSER_RENDERER_CONCURRENCY)
   --max-body-mb <mb>     Maximum request size (default: 32)
+  --recycle-after <n>    Relaunch Chrome after n renders (default: 200;
+                         or AGENT_BROWSER_RENDERER_RECYCLE_AFTER)
+  --allow-unauthenticated  Listen on a non-loopback address without a token
   --executable-path <p>  Chrome binary (or AGENT_BROWSER_EXECUTABLE_PATH)
 
 Environment:

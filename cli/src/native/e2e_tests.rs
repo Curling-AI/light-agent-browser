@@ -1088,6 +1088,121 @@ async fn e2e_lightpanda_auto_launch_can_open_page() {
     assert_eq!(get_data(&resp)["closed"], true);
 }
 
+/// Records the paths a renderer requested from a loopback server.
+async fn spawn_hit_recorder() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = hits.clone();
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let recorded = recorded.clone();
+            // One task per connection: an idle preconnect must not hold up
+            // the requests behind it.
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let line = String::from_utf8_lossy(&buf[..n])
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                // Speculative preconnects open and close without a request.
+                if let Some(path) = line.split_whitespace().nth(1) {
+                    recorded.lock().unwrap().push(path.to_string());
+                }
+                let _ = stream
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    .await;
+            });
+        }
+    });
+    (port, hits)
+}
+
+#[tokio::test]
+#[ignore]
+async fn e2e_renderer_service_policy_blocks_scripts_and_private_network() {
+    use crate::native::render::chrome::ChromeRenderer;
+    use crate::native::render::guard::RenderPolicy;
+    use crate::native::render::RenderRequest;
+
+    if crate::native::cdp::chrome::find_chrome().is_none() {
+        return;
+    }
+    let (port, hits) = spawn_hit_recorder().await;
+    let html = format!(
+        "<!doctype html><html><body><p>guard</p>\
+         <img src=\"http://127.0.0.1:{port}/img\">\
+         <link rel=\"stylesheet\" href=\"http://127.0.0.1:{port}/css\">\
+         <script>new Image().src = 'http://127.0.0.1:{port}/js';</script>\
+         </body></html>"
+    );
+    let request = |url: &str| -> RenderRequest {
+        serde_json::from_value(json!({
+            "url": url,
+            "html": html,
+            "viewport": { "width": 800, "height": 600 },
+            "timeoutMs": 5000,
+        }))
+        .unwrap()
+    };
+
+    // Control: the trusted local policy fetches all three, so the recorder
+    // would notice if the service policy let any through. The page sits on
+    // loopback because Chrome's Private Network Access already stops a public
+    // page from reaching it; the service must not depend on that.
+    let local_page = format!("http://127.0.0.1:{port}/page");
+    let local = ChromeRenderer::launch_with(None, 1, RenderPolicy::LOCAL)
+        .await
+        .unwrap();
+    local.render(&request(&local_page)).await.unwrap();
+    let seen = hits.lock().unwrap().clone();
+    for path in ["/css", "/img", "/js"] {
+        assert!(
+            seen.iter().any(|p| p == path),
+            "control render missed {path}: {seen:?}"
+        );
+    }
+    hits.lock().unwrap().clear();
+
+    // Scripts off on their own: the static image still loads, the one the
+    // script would create does not.
+    let scripts_off = RenderPolicy {
+        disable_javascript: true,
+        public_network_only: false,
+    };
+    let mut no_js = ChromeRenderer::launch_with(None, 1, scripts_off)
+        .await
+        .unwrap();
+    no_js.render(&request(&local_page)).await.unwrap();
+    let seen = std::mem::take(&mut *hits.lock().unwrap());
+    assert!(seen.iter().any(|p| p == "/img"), "{seen:?}");
+    assert!(!seen.iter().any(|p| p == "/js"), "script ran: {seen:?}");
+    no_js.shutdown().await;
+
+    let mut service = ChromeRenderer::launch_with(None, 1, RenderPolicy::SERVICE)
+        .await
+        .unwrap();
+    // Served at its origin (public and private), and written into a blank
+    // page: every path is gated.
+    for url in [local_page.as_str(), "https://example.com/", "about:blank"] {
+        let shot = service.render(&request(url)).await.unwrap();
+        assert!(!shot.data.is_empty(), "{url}");
+        let mut pdf_request = request(url);
+        pdf_request.output = "pdf".to_string();
+        service.render(&pdf_request).await.unwrap();
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        hits.lock().unwrap().is_empty(),
+        "service reached {:?}",
+        hits.lock().unwrap()
+    );
+    service.shutdown().await;
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_lightpanda_screenshot_renderers() {

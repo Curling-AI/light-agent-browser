@@ -6,6 +6,7 @@
 //! - `GET /healthz` → `{"ok": true}`
 //! - `POST /v1/render` → [`RenderResponse`] (bearer token required when configured)
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,11 +16,17 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
 use super::chrome::ChromeRenderer;
+use super::guard::RenderPolicy;
 use super::RenderRequest;
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const DEFAULT_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_RECYCLE_AFTER: u64 = 200;
+/// Largest viewport side a caller may ask for. Bounds the memory one request
+/// can make Chrome allocate for a capture.
+const MAX_VIEWPORT_SIDE: u32 = 4096;
+const MAX_DEVICE_SCALE_FACTOR: f64 = 2.0;
 
 #[derive(Debug, Clone)]
 pub struct ServeOptions {
@@ -29,6 +36,12 @@ pub struct ServeOptions {
     pub concurrency: usize,
     pub executable_path: Option<String>,
     pub max_body_bytes: usize,
+    /// Relaunch Chrome after this many renders, so a long-lived process
+    /// never accumulates state from earlier callers.
+    pub recycle_after: u64,
+    /// Listen on a non-loopback address without a token. Off by default:
+    /// requests carry page cookies.
+    pub allow_unauthenticated: bool,
 }
 
 impl Default for ServeOptions {
@@ -40,6 +53,8 @@ impl Default for ServeOptions {
             concurrency: 4,
             executable_path: None,
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            recycle_after: DEFAULT_RECYCLE_AFTER,
+            allow_unauthenticated: false,
         }
     }
 }
@@ -57,6 +72,9 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
     if let Ok(n) = std::env::var("AGENT_BROWSER_RENDERER_CONCURRENCY") {
         options.concurrency = parse_number(&n, "AGENT_BROWSER_RENDERER_CONCURRENCY")?;
     }
+    if let Ok(n) = std::env::var("AGENT_BROWSER_RENDERER_RECYCLE_AFTER") {
+        options.recycle_after = parse_number(&n, "AGENT_BROWSER_RENDERER_RECYCLE_AFTER")?;
+    }
     options.token = std::env::var(super::RENDERER_TOKEN_ENV)
         .ok()
         .filter(|t| !t.is_empty());
@@ -67,6 +85,11 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].as_str();
+        if flag == "--allow-unauthenticated" {
+            options.allow_unauthenticated = true;
+            i += 1;
+            continue;
+        }
         let value = || {
             args.get(i + 1)
                 .cloned()
@@ -77,6 +100,9 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
             "--port" => options.port = parse_number(&value()?, "--port")?,
             "--concurrency" => options.concurrency = parse_number(&value()?, "--concurrency")?,
             "--executable-path" => options.executable_path = Some(value()?),
+            "--recycle-after" => {
+                options.recycle_after = parse_number(&value()?, "--recycle-after")?
+            }
             "--max-body-mb" => {
                 let mb: usize = parse_number(&value()?, "--max-body-mb")?;
                 options.max_body_bytes = mb.max(1) * 1024 * 1024;
@@ -87,6 +113,9 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
     }
     if options.concurrency == 0 {
         return Err("--concurrency must be at least 1".to_string());
+    }
+    if options.recycle_after == 0 {
+        return Err("--recycle-after must be at least 1".to_string());
     }
     Ok(options)
 }
@@ -101,14 +130,27 @@ fn parse_number<T: std::str::FromStr>(value: &str, name: &str) -> Result<T, Stri
 struct ServerState {
     renderer: RwLock<ChromeRenderer>,
     options: ServeOptions,
+    renders: AtomicU64,
+}
+
+async fn launch(options: &ServeOptions) -> Result<ChromeRenderer, String> {
+    ChromeRenderer::launch_with(
+        options.executable_path.clone(),
+        options.concurrency,
+        RenderPolicy::SERVICE,
+    )
+    .await
 }
 
 pub async fn run(options: ServeOptions) -> Result<(), String> {
-    let renderer = ChromeRenderer::launch_with_concurrency(
-        options.executable_path.clone(),
-        options.concurrency,
-    )
-    .await?;
+    if options.token.is_none() && !is_loopback(&options.host) && !options.allow_unauthenticated {
+        return Err(format!(
+            "Refusing to serve on {} without a token: render requests carry page cookies. Set {} or pass --allow-unauthenticated",
+            options.host,
+            super::RENDERER_TOKEN_ENV
+        ));
+    }
+    let renderer = launch(&options).await?;
     let listener = TcpListener::bind((options.host.as_str(), options.port))
         .await
         .map_err(|e| format!("Failed to bind {}:{}: {}", options.host, options.port, e))?;
@@ -127,6 +169,7 @@ pub async fn run(options: ServeOptions) -> Result<(), String> {
     let state = Arc::new(ServerState {
         renderer: RwLock::new(renderer),
         options,
+        renders: AtomicU64::new(0),
     });
 
     loop {
@@ -179,7 +222,7 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) -> Re
                 return write_json(&mut stream, 401, &json!({ "error": "Unauthorized" })).await;
             }
             let render_request: RenderRequest = match serde_json::from_slice(&request.body) {
-                Ok(r) => r,
+                Ok(r) => bounded(r),
                 Err(e) => {
                     return write_json(
                         &mut stream,
@@ -198,12 +241,31 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) -> Re
     }
 }
 
-/// Renders, relaunching Chrome once if it died underneath the request.
+/// Clamps what a caller may make Chrome allocate.
+fn bounded(mut request: RenderRequest) -> RenderRequest {
+    request.viewport.width = request.viewport.width.clamp(1, MAX_VIEWPORT_SIDE);
+    request.viewport.height = request.viewport.height.clamp(1, MAX_VIEWPORT_SIDE);
+    request.viewport.device_scale_factor = request
+        .viewport
+        .device_scale_factor
+        .clamp(0.1, MAX_DEVICE_SCALE_FACTOR);
+    request
+}
+
+/// Renders, relaunching Chrome once if it died underneath the request, and
+/// recycling it every `recycle_after` renders.
 async fn render(
     state: &ServerState,
     request: &RenderRequest,
 ) -> Result<super::RenderResponse, String> {
     let first = state.renderer.read().await.render(request).await;
+    let count = state.renders.fetch_add(1, Ordering::Relaxed) + 1;
+    if count.is_multiple_of(state.options.recycle_after) {
+        // The write lock waits for renders in flight, so none is cut short.
+        let mut renderer = state.renderer.write().await;
+        renderer.shutdown().await;
+        *renderer = launch(&state.options).await?;
+    }
     if first.is_ok() {
         return first;
     }
@@ -212,11 +274,7 @@ async fn render(
         return first;
     }
     renderer.shutdown().await;
-    *renderer = ChromeRenderer::launch_with_concurrency(
-        state.options.executable_path.clone(),
-        state.options.concurrency,
-    )
-    .await?;
+    *renderer = launch(&state.options).await?;
     let renderer = tokio::sync::RwLockWriteGuard::downgrade(renderer);
     renderer.render(request).await
 }
@@ -379,6 +437,40 @@ mod tests {
         assert_eq!(options.port, 8080);
         assert_eq!(options.concurrency, 8);
         assert_eq!(options.max_body_bytes, 4 * 1024 * 1024);
+        assert_eq!(options.recycle_after, DEFAULT_RECYCLE_AFTER);
+        assert!(!options.allow_unauthenticated);
+
+        let options =
+            parse_serve_args(&args(&["--allow-unauthenticated", "--recycle-after", "50"])).unwrap();
+        assert!(options.allow_unauthenticated);
+        assert_eq!(options.recycle_after, 50);
+    }
+
+    #[tokio::test]
+    async fn refuses_network_listener_without_token() {
+        let options = ServeOptions {
+            host: "0.0.0.0".to_string(),
+            ..ServeOptions::default()
+        };
+        let err = run(options).await.unwrap_err();
+        assert!(err.contains("without a token"), "{err}");
+    }
+
+    #[test]
+    fn requests_are_bounded() {
+        let request: RenderRequest = serde_json::from_value(serde_json::json!({
+            "url": "https://example.com",
+            "html": "<p>x</p>",
+            "viewport": { "width": 100000, "height": 0, "deviceScaleFactor": 9.0 }
+        }))
+        .unwrap();
+        let request = bounded(request);
+        assert_eq!(request.viewport.width, MAX_VIEWPORT_SIDE);
+        assert_eq!(request.viewport.height, 1);
+        assert_eq!(
+            request.viewport.device_scale_factor,
+            MAX_DEVICE_SCALE_FACTOR
+        );
     }
 
     #[test]
@@ -386,6 +478,7 @@ mod tests {
         assert!(parse_serve_args(&args(&["--port", "abc"])).is_err());
         assert!(parse_serve_args(&args(&["--port"])).is_err());
         assert!(parse_serve_args(&args(&["--concurrency", "0"])).is_err());
+        assert!(parse_serve_args(&args(&["--recycle-after", "0"])).is_err());
         assert!(parse_serve_args(&args(&["--bogus", "1"])).is_err());
     }
 

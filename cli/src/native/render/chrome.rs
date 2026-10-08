@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::Instant;
 
+use super::guard::{self, RenderPolicy};
 use super::{RenderRequest, RenderResponse, REF_ATTR, TARGET_ATTR};
 use crate::native::cdp::chrome::{launch_chrome, ChromeProcess, LaunchOptions};
 use crate::native::cdp::client::CdpClient;
@@ -22,22 +23,30 @@ const DEFAULT_LOAD_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_LOAD_TIMEOUT: Duration = Duration::from_secs(60);
 /// Grace period for late layout (web fonts, images) after the load event.
 const SETTLE_DELAY: Duration = Duration::from_millis(100);
+/// Whole render, capture included. Below the remote client's 90s timeout so
+/// the caller gets the renderer's error instead of a dropped connection.
+const RENDER_DEADLINE: Duration = Duration::from_secs(85);
+/// Page events buffered for the render while the request gate answers
+/// `Fetch.requestPaused`. Overflow drops page events, never paused requests.
+const PAGE_EVENT_BUFFER: usize = 1024;
 
 pub struct ChromeRenderer {
     process: ChromeProcess,
     client: Arc<CdpClient>,
     slots: Arc<Semaphore>,
+    policy: RenderPolicy,
 }
 
 impl ChromeRenderer {
     /// Launches a dedicated headless Chrome. `executable_path` overrides discovery.
     pub async fn launch(executable_path: Option<String>) -> Result<Self, String> {
-        Self::launch_with_concurrency(executable_path, 1).await
+        Self::launch_with(executable_path, 1, RenderPolicy::LOCAL).await
     }
 
-    pub async fn launch_with_concurrency(
+    pub async fn launch_with(
         executable_path: Option<String>,
         concurrency: usize,
+        policy: RenderPolicy,
     ) -> Result<Self, String> {
         let options = LaunchOptions {
             headless: true,
@@ -55,6 +64,7 @@ impl ChromeRenderer {
             process,
             client,
             slots: Arc::new(Semaphore::new(concurrency.max(1))),
+            policy,
         })
     }
 
@@ -92,7 +102,20 @@ impl ChromeRenderer {
             .ok_or("Target.createBrowserContext returned no id")?
             .to_string();
 
-        let result = self.render_in_context(&context_id, request).await;
+        // The context is disposed on every path, timeout included, so a
+        // render can never leave another caller's cookies behind.
+        let result = match tokio::time::timeout(
+            RENDER_DEADLINE,
+            self.render_in_context(&context_id, request),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "Renderer gave up after {}s",
+                RENDER_DEADLINE.as_secs()
+            )),
+        };
 
         let _ = self
             .client
@@ -135,8 +158,18 @@ impl ChromeRenderer {
             .ok_or("Target.attachToTarget returned no sessionId")?
             .to_string();
 
-        let mut events = client.subscribe_session(&session_id);
+        let raw_events = client.subscribe_session(&session_id);
+        let (forward, mut events) = mpsc::channel(PAGE_EVENT_BUFFER);
+        let gate = RequestGate {
+            client: client.clone(),
+            session_id: session_id.clone(),
+            policy: self.policy,
+            main_document: is_http_url(&request.url)
+                .then(|| base64::engine::general_purpose::STANDARD.encode(request.html.as_bytes())),
+        };
+        let gate_task = tokio::spawn(gate.run(raw_events, forward));
         let result = self.render_page(&session_id, &mut events, request).await;
+        gate_task.abort();
         client.unsubscribe_session(&session_id);
         result
     }
@@ -150,6 +183,15 @@ impl ChromeRenderer {
         let client = &self.client;
         let sid = Some(session_id);
         client.send_command_no_params("Page.enable", sid).await?;
+        if self.policy.disable_javascript {
+            client
+                .send_command(
+                    "Emulation.setScriptExecutionDisabled",
+                    Some(json!({ "value": true })),
+                    sid,
+                )
+                .await?;
+        }
         client
             .send_command(
                 "Emulation.setDeviceMetricsOverride",
@@ -282,24 +324,14 @@ impl ChromeRenderer {
     ) -> Result<(), String> {
         let client = &self.client;
         let sid = Some(session_id);
-        client
-            .send_command(
-                "Fetch.enable",
-                Some(json!({
-                    "patterns": [{ "urlPattern": "*", "resourceType": "Document", "requestStage": "Request" }]
-                })),
-                sid,
-            )
-            .await?;
+        self.enable_request_gate(session_id, true).await?;
 
-        let body = base64::engine::general_purpose::STANDARD.encode(request.html.as_bytes());
         let deadline = Instant::now() + timeout;
         let navigate =
             client.send_command("Page.navigate", Some(json!({ "url": request.url })), sid);
         tokio::pin!(navigate);
 
         let mut navigated = false;
-        let mut served_main = false;
         let mut loaded = false;
         while !(navigated && loaded) {
             tokio::select! {
@@ -314,32 +346,8 @@ impl ChromeRenderer {
                     let Some(event) = event else {
                         return Err("Renderer page closed while loading".to_string());
                     };
-                    match event.method.as_str() {
-                        "Fetch.requestPaused" => {
-                            let request_id = event.params.get("requestId").and_then(|v| v.as_str()).unwrap_or_default();
-                            if !served_main {
-                                served_main = true;
-                                client.send_command(
-                                    "Fetch.fulfillRequest",
-                                    Some(json!({
-                                        "requestId": request_id,
-                                        "responseCode": 200,
-                                        "responseHeaders": [{ "name": "Content-Type", "value": "text/html; charset=utf-8" }],
-                                        "body": body,
-                                    })),
-                                    sid,
-                                ).await?;
-                            } else {
-                                // Nested documents (iframes) load from the network.
-                                let _ = client.send_command(
-                                    "Fetch.continueRequest",
-                                    Some(json!({ "requestId": request_id })),
-                                    sid,
-                                ).await;
-                            }
-                        }
-                        "Page.loadEventFired" => loaded = true,
-                        _ => {}
+                    if event.method == "Page.loadEventFired" {
+                        loaded = true;
                     }
                 }
                 _ = tokio::time::sleep_until(deadline) => {
@@ -351,8 +359,30 @@ impl ChromeRenderer {
                 }
             }
         }
-        let _ = client.send_command_no_params("Fetch.disable", sid).await;
         Ok(())
+    }
+
+    /// Routes requests through [`RequestGate`]: the main document when it is
+    /// served at its original URL, and every request under
+    /// [`RenderPolicy::public_network_only`]. Interception stays on for the
+    /// whole render, so resources requested after the load event are checked
+    /// too.
+    async fn enable_request_gate(&self, session_id: &str, serve_main: bool) -> Result<(), String> {
+        let patterns = if self.policy.public_network_only {
+            json!([{ "urlPattern": "*", "requestStage": "Request" }])
+        } else if serve_main {
+            json!([{ "urlPattern": "*", "resourceType": "Document", "requestStage": "Request" }])
+        } else {
+            return Ok(());
+        };
+        self.client
+            .send_command(
+                "Fetch.enable",
+                Some(json!({ "patterns": patterns })),
+                Some(session_id),
+            )
+            .await
+            .map(|_| ())
     }
 
     /// For non-HTTP pages (about:blank, data:, file:) there is no origin to
@@ -375,6 +405,7 @@ impl ChromeRenderer {
             .and_then(|f| f.get("id"))
             .and_then(|v| v.as_str())
             .ok_or("Renderer page has no main frame")?;
+        self.enable_request_gate(session_id, false).await?;
         client
             .send_command(
                 "Page.setDocumentContent",
@@ -400,6 +431,97 @@ impl ChromeRenderer {
         }
         Ok(())
     }
+}
+
+/// Answers `Fetch.requestPaused` for one render and forwards every other
+/// event to the page logic. Running apart from the page logic matters: a
+/// request paused while the page waits on something else would otherwise
+/// stall until the render deadline.
+struct RequestGate {
+    client: Arc<CdpClient>,
+    session_id: String,
+    policy: RenderPolicy,
+    /// Base64 body served for the first document request, when the page is
+    /// rendered at its original URL.
+    main_document: Option<String>,
+}
+
+impl RequestGate {
+    async fn run(mut self, mut events: mpsc::Receiver<CdpEvent>, forward: mpsc::Sender<CdpEvent>) {
+        while let Some(event) = events.recv().await {
+            if event.method != "Fetch.requestPaused" {
+                // Late page events nobody reads are expendable.
+                let _ = forward.try_send(event);
+                continue;
+            }
+            let is_document =
+                event.params.get("resourceType").and_then(|v| v.as_str()) == Some("Document");
+            if is_document {
+                if let Some(body) = self.main_document.take() {
+                    self.fulfill_main(&event.params, body).await;
+                    continue;
+                }
+            }
+            let client = self.client.clone();
+            let session_id = self.session_id.clone();
+            let policy = self.policy;
+            // Checks resolve DNS; answering them concurrently keeps a page
+            // with many subresources from loading them one at a time.
+            tokio::spawn(async move {
+                answer_paused(&client, &session_id, policy, &event.params).await;
+            });
+        }
+    }
+
+    async fn fulfill_main(&self, params: &Value, body: String) {
+        let request_id = params
+            .get("requestId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let _ = self
+            .client
+            .send_command(
+                "Fetch.fulfillRequest",
+                Some(json!({
+                    "requestId": request_id,
+                    "responseCode": 200,
+                    "responseHeaders": [{ "name": "Content-Type", "value": "text/html; charset=utf-8" }],
+                    "body": body,
+                })),
+                Some(&self.session_id),
+            )
+            .await;
+    }
+}
+
+async fn answer_paused(client: &CdpClient, session_id: &str, policy: RenderPolicy, params: &Value) {
+    let request_id = params
+        .get("requestId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if policy.public_network_only {
+        let url = params
+            .pointer("/request/url")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if guard::check_public_url(url).await.is_err() {
+            let _ = client
+                .send_command(
+                    "Fetch.failRequest",
+                    Some(json!({ "requestId": request_id, "errorReason": "BlockedByClient" })),
+                    Some(session_id),
+                )
+                .await;
+            return;
+        }
+    }
+    let _ = client
+        .send_command(
+            "Fetch.continueRequest",
+            Some(json!({ "requestId": request_id })),
+            Some(session_id),
+        )
+        .await;
 }
 
 /// Rebuilds the snapshot refs inside the renderer page from [`REF_ATTR`] markers.
