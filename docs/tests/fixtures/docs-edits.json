@@ -8,12 +8,40 @@
       {
         "from": "# Clear CA trust retained by the running session",
         "to": "# Clear CA trust retained by the running session\n--use-system-ca          # Use the OS trust store for CLI requests (read, install, upgrade, doctor)"
+      },
+      {
+        "from": "agent-browser screenshot --screenshot-format jpeg --screenshot-quality 80\nagent-browser pdf",
+        "to": "agent-browser screenshot --screenshot-format jpeg --screenshot-quality 80\nagent-browser --screenshot-renderer chrome screenshot  # Choose the Lightpanda screenshot renderer\nagent-browser pdf"
+      },
+      {
+        "from": "--screenshot-format <fmt> # Format: png (default), jpeg (or AGENT_BROWSER_SCREENSHOT_FORMAT)",
+        "to": "--screenshot-format <fmt> # Format: png (default), jpeg (or AGENT_BROWSER_SCREENSHOT_FORMAT)\n--screenshot-renderer <m> # Lightpanda screenshot renderer: auto (default), chrome, native, or http(s):// URL (or AGENT_BROWSER_SCREENSHOT_RENDERER)"
+      },
+      {
+        "from": "# Browser engine: chrome (default), lightpanda, obscura (experimental)",
+        "to": "# Browser engine: lightpanda (default, falls back to chrome when unavailable), chrome, obscura (experimental)"
       }
     ],
     "/configuration": [
       {
         "from": "This initial implementation does not support",
         "to": "Browser trust does not support"
+      },
+      {
+        "from": "<td>string (<code>chrome</code>, <code>lightpanda</code>, <code>obscura</code>)</td>",
+        "to": "<td>string (<code>lightpanda</code>, <code>chrome</code>, <code>obscura</code>); defaults to <code>lightpanda</code>, falling back to Chrome with a warning when Lightpanda cannot serve the launch</td>"
+      },
+      {
+        "from": "string (chrome, lightpanda, obscura)",
+        "to": "string (lightpanda, chrome, obscura); defaults to lightpanda, falling back to Chrome with a warning when Lightpanda cannot serve the launch"
+      },
+      {
+        "from": "Browser engine to use: <code>chrome</code> (default), <code>lightpanda</code>, <code>obscura</code> (experimental).</td><td><code>chrome</code></td>",
+        "to": "Browser engine to use: <code>lightpanda</code> (default), <code>chrome</code>, <code>obscura</code> (experimental). Without an explicit engine, agent-browser uses Chrome with a warning on Windows, when Lightpanda is not installed, when <code>--executable-path</code> is not a Lightpanda binary, or when a Chrome-only option is set. See <a href=\"/engines/lightpanda#engine-selection-and-chrome-fallback\">Engine selection</a>.</td><td><code>lightpanda</code></td>"
+      },
+      {
+        "from": "Browser engine to use: chrome (default), lightpanda, obscura (experimental).",
+        "to": "Browser engine to use: lightpanda (default), chrome, obscura (experimental)."
       }
     ],
     "/proxy": [
@@ -37,9 +65,160 @@
         "from": "It is not supported on macOS or Windows.",
         "to": "Browser trust is not supported on macOS or Windows, where Chromium already uses the operating system trust store."
       }
+    ],
+    "/": [
+      {
+        "from": "agent-browser install             # Download Chrome (first time)",
+        "to": "agent-browser install             # Download Lightpanda, the default engine (first time)\nagent-browser install --with-chrome # Also download Chrome (visual screenshots, --headed)"
+      },
+      {
+        "from": "npm install -g agent-browser      # all platforms\nbrew install agent-browser        # macOS",
+        "to": "npm install -g light-agent-browser # all platforms; installs the agent-browser command"
+      },
+      {
+        "from": "npx agent-browser open example.com",
+        "to": "npx -p light-agent-browser agent-browser open example.com"
+      }
+    ],
+    "/installation": [
+      {
+        "from": "agent-browser install  # Download Chrome from Chrome for Testing (first time)",
+        "to": "agent-browser install  # Download Lightpanda, the default engine (first time)"
+      },
+      {
+        "from": "npx agent-browser install   # Download Chrome (first time only)",
+        "to": "npx agent-browser install   # Download Lightpanda (first time only)"
+      },
+      {
+        "from": "npx agent-browser install  # Download Chrome (first time)",
+        "to": "npx agent-browser install  # Download Lightpanda (first time)"
+      },
+      {
+        "from": "agent-browser install  # Download Chrome (first time)",
+        "to": "agent-browser install  # Download Lightpanda (first time)"
+      },
+      {
+        "from": "npx agent-browser install   # Download Lightpanda (first time only)\nnpx agent-browser open example.com",
+        "to": "npx -p light-agent-browser agent-browser install   # Download Lightpanda (first time only)\nnpx -p light-agent-browser agent-browser open example.com"
+      },
+      {
+        "from": "npm install -g agent-browser",
+        "to": "npm install -g light-agent-browser"
+      },
+      {
+        "from": "npm install agent-browser",
+        "to": "npm install light-agent-browser"
+      },
+      {
+        "from": "## Homebrew (macOS)\n\n```bash\nbrew install agent-browser\nagent-browser install  # Download Lightpanda (first time)\n```\n\n",
+        "to": ""
+      },
+      {
+        "from": "brew install agent-browser\nagent-browser install  # Download Lightpanda (first time)",
+        "to": ""
+      },
+      {
+        "from": "cargo install agent-browser",
+        "to": "cargo install --git https://github.com/Curling-AI/light-agent-browser agent-browser"
+      },
+      {
+        "from": "git clone https://github.com/vercel-labs/agent-browser\ncd agent-browser",
+        "to": "git clone https://github.com/Curling-AI/light-agent-browser\ncd light-agent-browser"
+      },
+      {
+        "from": "Detects your installation method (npm, Homebrew, or Cargo) and runs the appropriate update command automatically.",
+        "to": "Detects your installation method (npm, pnpm, yarn, bun, or Cargo) and upgrades the light-agent-browser package automatically."
+      },
+      {
+        "from": "npx skills add vercel-labs/agent-browser",
+        "to": "npx skills add Curling-AI/light-agent-browser"
+      }
+    ],
+    "/webgpu": [
+      {
+        "from": "&& agent-browser install",
+        "to": "&& agent-browser --engine chrome install"
+      },
+      {
+        "from": "RUN npm install -g agent-browser \\",
+        "to": "RUN npm install -g light-agent-browser \\"
+      }
+    ],
+    "/engines/chrome": [
+      {
+        "from": "Chrome (and Chromium) is the default browser engine.",
+        "to": "Chrome (and Chromium) is the full-fidelity browser engine."
+      },
+      {
+        "from": "`agent-browser install` to download Chrome from Chrome for Testing.",
+        "to": "`agent-browser install --with-chrome` to download Chrome from Chrome for Testing alongside Lightpanda,"
+      },
+      {
+        "from": "run agent-browser install to download Chrome from Chrome for Testing.",
+        "to": "run agent-browser install --with-chrome to download Chrome from Chrome for Testing alongside Lightpanda,"
+      },
+      {
+        "from": "Chrome is the default engine -- no `--engine` flag is needed:\n\n```bash\nagent-browser open example.com\n```\n\nTo be explicit:\n\n```bash\nagent-browser --engine chrome open example.com\n```",
+        "to": "Select Chrome with the `--engine` flag:\n\n```bash\nagent-browser --engine chrome open example.com\n```\n\nOr set it as the default via environment variable or config:\n\n```bash\nAGENT_BROWSER_ENGINE=chrome agent-browser open example.com\n```\n\n```json\n{\n  \"engine\": \"chrome\"\n}\n```\n\nAn explicit engine restores the previous Chrome default and silences the fallback warning."
+      },
+      {
+        "from": "Chrome is the default engine -- no --engine flag is needed:",
+        "to": "Select Chrome with the --engine flag:"
+      },
+      {
+        "from": "To be explicit:",
+        "to": "Or set it as the default via environment variable or config:"
+      }
+    ],
+    "/engines/lightpanda": [
+      {
+        "from": "agent-browser manages Lightpanda the same way it manages Chrome -- spawning the process, connecting via CDP, and shutting it down.",
+        "to": "agent-browser manages Lightpanda the same way it manages Chrome: it spawns the process, connects via CDP, and shuts it down."
+      },
+      {
+        "from": "Install the Lightpanda binary before using it with agent-browser:",
+        "to": "You can also install the Lightpanda binary yourself:"
+      },
+      {
+        "from": "Use the `--engine` flag to select Lightpanda:",
+        "to": "To pin the engine explicitly, use the `--engine` flag:"
+      },
+      {
+        "from": "Use the --engine flag to select Lightpanda:",
+        "to": "To pin the engine explicitly, use the --engine flag:"
+      },
+      {
+        "from": "Or set it as the default via environment variable:",
+        "to": "Or set it via environment variable:"
+      },
+      {
+        "from": "is not in your `PATH`, use",
+        "to": "is not in one of the discovery locations, use"
+      },
+      {
+        "from": "is not in your PATH, use",
+        "to": "is not in one of the discovery locations, use"
+      },
+      {
+        "from": "<td>Depends on Lightpanda CDP support</td>",
+        "to": "<td>Rendered by Chrome from the Lightpanda DOM (see <a href=\"#screenshots\">Screenshots</a>)</td>"
+      },
+      {
+        "from": "Depends on Lightpanda CDP support",
+        "to": "Rendered by Chrome from the Lightpanda DOM (see Screenshots)"
+      }
+    ],
+    "/skills": [
+      {
+        "from": "npx skills add vercel-labs/agent-browser",
+        "to": "npx skills add Curling-AI/light-agent-browser"
+      }
     ]
   },
   "resources": {
-    "/schema.json": { "size": 9427, "sha256": "eecb6f5aa3f6c7f0a4f0fb1176923c5b7d005065fea101ff90394c2845b97468" }
+    "/schema.json": {
+      "size": 9427,
+      "sha256": "eecb6f5aa3f6c7f0a4f0fb1176923c5b7d005065fea101ff90394c2845b97468"
+    }
   }
 }

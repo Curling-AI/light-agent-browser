@@ -1,4 +1,4 @@
-const REPO = "vercel-labs/agent-browser";
+const REPO = "Curling-AI/light-agent-browser";
 const REVALIDATE = 86400;
 
 export async function getStarCount(): Promise<string> {

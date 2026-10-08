@@ -99,7 +99,9 @@ Match the existing style in that file.
 
 ## Architecture
 
-This is a Rust codebase. The browser automation daemon lives in `cli/src/native/` (daemon, actions, browser, CDP client, snapshot, state). The `--engine` flag selects Chrome vs Lightpanda. The `install` command downloads Chrome from Chrome for Testing directly.
+This is a Rust codebase. The browser automation daemon lives in `cli/src/native/` (daemon, actions, browser, CDP client, snapshot, state). The `--engine` flag selects Chrome vs Lightpanda. Lightpanda is the default engine; `cli/src/native/engine.rs` decides when an unset engine falls back to Chrome. Screenshots of Lightpanda pages are rendered by Chrome through `cli/src/native/render/` (local or `agent-browser renderer serve`). The `install` command downloads Lightpanda from its GitHub releases (`cli/src/lightpanda_install.rs`) and Chrome from Chrome for Testing with `--with-chrome`.
+
+This repository is a fork of vercel-labs/agent-browser. Keep fork behavior in fork-only files and keep hooks in upstream files small. See `FORK.md` for the list of divergence points and the upstream sync procedure; update it when adding a new hook.
 
 ## Testing
 
@@ -122,6 +124,12 @@ Runs 18 e2e tests that launch real headless Chrome instances and exercise the fu
 - Chrome must be installed
 - Must run serially (`--test-threads=1`) to avoid Chrome instance contention
 - Tests are `#[ignore]`'d so they don't run during normal `cargo test`
+
+Test builds resolve an unset engine to Chrome so the upstream e2e suite runs unmodified. To also run the Lightpanda e2e tests, including the screenshot renderer test (which needs Chrome too), point `LIGHTPANDA_BIN` at a Lightpanda binary:
+
+```bash
+cd cli && LIGHTPANDA_BIN=~/.agent-browser/browsers/lightpanda-1.0.0/lightpanda cargo test e2e_lightpanda -- --ignored --test-threads=1
+```
 
 The e2e tests live in `cli/src/native/e2e_tests.rs` and cover: launch/close, navigation, snapshots, screenshots, form interaction, cookies, storage, tabs, element queries, viewport/emulation, domain filtering, diff, state management, error handling, and Phase 8 commands.
 

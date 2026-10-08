@@ -102,6 +102,7 @@ pub struct Config {
     pub screenshot_dir: Option<String>,
     pub screenshot_quality: Option<u32>,
     pub screenshot_format: Option<String>,
+    pub screenshot_renderer: Option<String>,
     pub idle_timeout: Option<String>,
     pub no_auto_dialog: Option<bool>,
     pub model: Option<String>,
@@ -186,6 +187,7 @@ impl Config {
             screenshot_dir: other.screenshot_dir.or(self.screenshot_dir),
             screenshot_quality: other.screenshot_quality.or(self.screenshot_quality),
             screenshot_format: other.screenshot_format.or(self.screenshot_format),
+            screenshot_renderer: other.screenshot_renderer.or(self.screenshot_renderer),
             idle_timeout: other.idle_timeout.or(self.idle_timeout),
             no_auto_dialog: other.no_auto_dialog.or(self.no_auto_dialog),
             model: other.model.or(self.model),
@@ -314,6 +316,7 @@ fn extract_config_path(args: &[String]) -> Option<Option<String>> {
         "--screenshot-dir",
         "--screenshot-quality",
         "--screenshot-format",
+        "--screenshot-renderer",
         "--idle-timeout",
         "--ca-cert",
         "--model",
@@ -416,6 +419,8 @@ pub struct Flags {
     pub screenshot_dir: Option<String>,
     pub screenshot_quality: Option<u32>,
     pub screenshot_format: Option<String>,
+    /// Renderer for Lightpanda screenshots: auto, chrome, native, or a URL.
+    pub screenshot_renderer: Option<String>,
     pub idle_timeout: Option<String>, // Canonical milliseconds string for AGENT_BROWSER_IDLE_TIMEOUT_MS
     pub default_timeout: Option<u64>, // AGENT_BROWSER_DEFAULT_TIMEOUT in ms
     pub no_auto_dialog: bool,
@@ -653,6 +658,10 @@ pub fn parse_flags(args: &[String]) -> Flags {
             .ok()
             .or(config.screenshot_format)
             .filter(|s| s == "png" || s == "jpeg"),
+        screenshot_renderer: env::var("AGENT_BROWSER_SCREENSHOT_RENDERER")
+            .ok()
+            .or(config.screenshot_renderer)
+            .filter(|s| !s.trim().is_empty()),
         idle_timeout: parse_idle_timeout_value(
             env::var("AGENT_BROWSER_IDLE_TIMEOUT_MS").ok(),
             "AGENT_BROWSER_IDLE_TIMEOUT_MS",
@@ -1117,6 +1126,12 @@ pub fn parse_flags(args: &[String]) -> Flags {
                     i += 1;
                 }
             }
+            "--screenshot-renderer" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.screenshot_renderer = Some(s.clone());
+                    i += 1;
+                }
+            }
             "--no-auto-dialog" => {
                 let (val, consumed) = parse_bool_arg(args, i);
                 flags.no_auto_dialog = val;
@@ -1219,6 +1234,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--screenshot-dir",
         "--screenshot-quality",
         "--screenshot-format",
+        "--screenshot-renderer",
         "--idle-timeout",
         "--ca-cert",
         "--model",

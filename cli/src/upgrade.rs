@@ -3,7 +3,10 @@ use std::path::Path;
 use std::process::{exit, Command, Stdio};
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org/agent-browser/latest";
+/// npm package this fork is published as (the CLI command stays `agent-browser`).
+const PACKAGE_NAME: &str = "light-agent-browser";
+const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org/light-agent-browser/latest";
+const CARGO_GIT_URL: &str = "https://github.com/Curling-AI/light-agent-browser";
 
 enum InstallMethod {
     Npm,
@@ -86,8 +89,8 @@ fn detect_install_method() -> InstallMethod {
             return InstallMethod::Bun;
         }
 
-        if path_str.contains("node_modules/agent-browser")
-            || path_str.contains("node_modules\\agent-browser")
+        if path_str.contains("node_modules/light-agent-browser")
+            || path_str.contains("node_modules\\light-agent-browser")
         {
             return InstallMethod::Npm;
         }
@@ -104,21 +107,21 @@ fn detect_install_method() -> InstallMethod {
 
     if command_output_contains(
         "pnpm",
-        &["list", "-g", "agent-browser", "--depth=0"],
-        "agent-browser",
+        &["list", "-g", PACKAGE_NAME, "--depth=0"],
+        PACKAGE_NAME,
     ) {
         return InstallMethod::Pnpm;
     }
 
-    if command_output_contains("yarn", &["global", "list", "--depth=0"], "agent-browser") {
+    if command_output_contains("yarn", &["global", "list", "--depth=0"], PACKAGE_NAME) {
         return InstallMethod::Yarn;
     }
 
-    if command_output_contains("bun", &["pm", "ls", "-g"], "agent-browser") {
+    if command_output_contains("bun", &["pm", "ls", "-g"], PACKAGE_NAME) {
         return InstallMethod::Bun;
     }
 
-    if command_succeeds("npm", &["list", "-g", "agent-browser", "--depth=0"]) {
+    if command_succeeds("npm", &["list", "-g", PACKAGE_NAME, "--depth=0"]) {
         return InstallMethod::Npm;
     }
 
@@ -144,49 +147,54 @@ fn command_output_contains(cmd: &str, args: &[&str], needle: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn run_upgrade_command(method: &InstallMethod) -> bool {
-    let (cmd, args, display): (&str, &[&str], &str) = match method {
-        InstallMethod::Npm => (
-            "npm",
-            &["install", "-g", "agent-browser@latest"],
-            "npm install -g agent-browser@latest",
-        ),
-        InstallMethod::Pnpm => (
-            "pnpm",
-            &["add", "-g", "agent-browser@latest"],
-            "pnpm add -g agent-browser@latest",
-        ),
+fn upgrade_command(method: &InstallMethod) -> Option<(&'static str, Vec<String>)> {
+    let latest = format!("{}@latest", PACKAGE_NAME);
+    let (cmd, args): (&str, Vec<String>) = match method {
+        InstallMethod::Npm => ("npm", vec!["install".into(), "-g".into(), latest]),
+        InstallMethod::Pnpm => ("pnpm", vec!["add".into(), "-g".into(), latest]),
         // NOTE: `yarn global` is Yarn Classic (v1) only; Yarn Berry (v2+) removed it.
         // Users on Yarn v2+ won't reach this path — detection falls through to Unknown.
-        InstallMethod::Yarn => (
-            "yarn",
-            &["global", "add", "agent-browser@latest"],
-            "yarn global add agent-browser@latest",
-        ),
-        InstallMethod::Bun => (
-            "bun",
-            &["install", "-g", "agent-browser@latest"],
-            "bun install -g agent-browser@latest",
-        ),
-        InstallMethod::Homebrew => (
-            "brew",
-            &["upgrade", "agent-browser"],
-            "brew upgrade agent-browser",
-        ),
+        InstallMethod::Yarn => ("yarn", vec!["global".into(), "add".into(), latest]),
+        InstallMethod::Bun => ("bun", vec!["install".into(), "-g".into(), latest]),
         InstallMethod::Cargo => (
             "cargo",
-            &["install", "agent-browser", "--force"],
-            "cargo install agent-browser --force",
+            vec![
+                "install".into(),
+                "--git".into(),
+                CARGO_GIT_URL.into(),
+                "agent-browser".into(),
+                "--force".into(),
+            ],
         ),
-        InstallMethod::Unknown => return false,
+        // There is no Homebrew formula for this fork; a Homebrew install is
+        // upstream agent-browser and upgrading it would not install the fork.
+        InstallMethod::Homebrew | InstallMethod::Unknown => return None,
     };
+    Some((cmd, args))
+}
 
-    println!("Running: {}", display);
+fn run_upgrade_command(method: &InstallMethod) -> bool {
+    let Some((cmd, args)) = upgrade_command(method) else {
+        return false;
+    };
+    println!("Running: {} {}", cmd, args.join(" "));
     Command::new(cmd)
-        .args(args)
+        .args(&args)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+fn print_manual_upgrade_help() {
+    eprintln!("  To update manually, run one of:");
+    eprintln!("    npm install -g {}@latest       # npm", PACKAGE_NAME);
+    eprintln!("    pnpm add -g {}@latest          # pnpm", PACKAGE_NAME);
+    eprintln!("    yarn global add {}@latest      # yarn", PACKAGE_NAME);
+    eprintln!("    bun install -g {}@latest       # bun", PACKAGE_NAME);
+    eprintln!(
+        "    cargo install --git {} agent-browser --force   # Cargo",
+        CARGO_GIT_URL
+    );
 }
 
 pub fn run_upgrade() {
@@ -218,8 +226,9 @@ pub fn run_upgrade() {
 
     if !latest.is_empty() && current == latest.as_str() {
         println!(
-            "{} agent-browser is already at the latest version (v{})",
+            "{} {} is already at the latest version (v{})",
             color::success_indicator(),
+            PACKAGE_NAME,
             current
         );
         return;
@@ -242,13 +251,16 @@ pub fn run_upgrade() {
             "{} Could not detect installation method.",
             color::error_indicator()
         );
-        eprintln!("  To update manually, run one of:");
-        eprintln!("    npm install -g agent-browser@latest       # npm");
-        eprintln!("    pnpm add -g agent-browser@latest          # pnpm");
-        eprintln!("    yarn global add agent-browser@latest       # yarn");
-        eprintln!("    bun install -g agent-browser@latest        # bun");
-        eprintln!("    brew upgrade agent-browser                 # Homebrew");
-        eprintln!("    cargo install agent-browser --force        # Cargo");
+        print_manual_upgrade_help();
+        exit(1);
+    }
+    if matches!(method, InstallMethod::Homebrew) {
+        eprintln!(
+            "{} This binary was installed with Homebrew, which ships upstream agent-browser. Install {} instead:",
+            color::error_indicator(),
+            PACKAGE_NAME
+        );
+        print_manual_upgrade_help();
         exit(1);
     }
 
@@ -258,14 +270,14 @@ pub fn run_upgrade() {
         println!(
             "{}",
             color::cyan(&format!(
-                "Upgrading agent-browser... v{} → v{}",
-                current, latest
+                "Upgrading {}... v{} → v{}",
+                PACKAGE_NAME, current, latest
             ))
         );
     } else {
         println!(
             "{}",
-            color::cyan(&format!("Upgrading agent-browser (v{})...", current))
+            color::cyan(&format!("Upgrading {} (v{})...", PACKAGE_NAME, current))
         );
     }
 
@@ -285,5 +297,21 @@ pub fn run_upgrade() {
     } else {
         eprintln!("{} Upgrade failed.", color::error_indicator());
         exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upgrade_commands_target_the_fork_package() {
+        let (cmd, args) = upgrade_command(&InstallMethod::Npm).unwrap();
+        assert_eq!(cmd, "npm");
+        assert_eq!(args, ["install", "-g", "light-agent-browser@latest"]);
+        let (_, args) = upgrade_command(&InstallMethod::Cargo).unwrap();
+        assert!(args.contains(&CARGO_GIT_URL.to_string()));
+        assert!(upgrade_command(&InstallMethod::Homebrew).is_none());
+        assert!(NPM_REGISTRY_URL.contains(PACKAGE_NAME));
     }
 }

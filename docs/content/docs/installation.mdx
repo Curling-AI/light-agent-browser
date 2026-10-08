@@ -8,17 +8,37 @@ navTitle: "Installation"
 Installs the native Rust binary for maximum performance:
 
 ```bash
-npm install -g agent-browser
-agent-browser install  # Download Chrome from Chrome for Testing (first time)
+npm install -g light-agent-browser
+agent-browser install  # Download Lightpanda, the default engine (first time)
 ```
 
+The package is named `light-agent-browser` and installs the `agent-browser` command. Install it or upstream `agent-browser` globally, not both.
+
 This is the fastest option -- commands run through the native Rust CLI directly with sub-millisecond parsing overhead.
+
+## Browser binaries
+
+`agent-browser install` downloads [Lightpanda](/engines/lightpanda), the default engine, into `~/.agent-browser/browsers/`. Chrome is optional but recommended: it renders visual screenshots of Lightpanda pages and serves Chrome-only options such as `--headed`, `--profile`, and `--extension`.
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Installs</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>agent-browser install</code></td><td>Lightpanda (macOS and Linux, x86_64 and ARM64). On Windows, which has no Lightpanda build, Chrome instead</td></tr>
+    <tr><td><code>agent-browser install --with-chrome</code></td><td>Lightpanda plus Chrome from Chrome for Testing</td></tr>
+    <tr><td><code>agent-browser install --with-deps</code></td><td>Lightpanda plus Chrome and its Linux system dependencies (implies Chrome)</td></tr>
+    <tr><td><code>agent-browser --engine chrome install</code></td><td>Only Chrome from Chrome for Testing (the previous behavior)</td></tr>
+  </tbody>
+</table>
+
+The pinned Lightpanda release is `1.0.0`. Set `AGENT_BROWSER_LIGHTPANDA_VERSION` to install another release; `nightly` always re-downloads. Without an explicit `--engine`, agent-browser falls back to Chrome with a warning when Lightpanda is unavailable or a Chrome-only option is set. See [Engine selection](/engines/lightpanda#engine-selection-and-chrome-fallback).
 
 ## Quick start (no install)
 
 ```bash
-npx agent-browser install   # Download Chrome (first time only)
-npx agent-browser open example.com
+npx -p light-agent-browser agent-browser install   # Download Lightpanda (first time only)
+npx -p light-agent-browser agent-browser open example.com
 ```
 
 ## Project installation (local dependency)
@@ -26,24 +46,17 @@ npx agent-browser open example.com
 For projects that want to pin the version in `package.json`:
 
 ```bash
-npm install agent-browser
-npx agent-browser install  # Download Chrome (first time)
+npm install light-agent-browser
+npx agent-browser install  # Download Lightpanda (first time)
 ```
 
 Then use via `npx` or `package.json` scripts.
 
-## Homebrew (macOS)
-
-```bash
-brew install agent-browser
-agent-browser install  # Download Chrome (first time)
-```
-
 ## Cargo (Rust)
 
 ```bash
-cargo install agent-browser
-agent-browser install  # Download Chrome (first time)
+cargo install --git https://github.com/Curling-AI/light-agent-browser agent-browser
+agent-browser install  # Download Lightpanda (first time)
 ```
 
 Compiles from source (~2-3 min). Requires Node.js 24+, pnpm 11+, and the Rust toolchain ([rustup.rs](https://rustup.rs)).
@@ -51,8 +64,8 @@ Compiles from source (~2-3 min). Requires Node.js 24+, pnpm 11+, and the Rust to
 ## From source
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
-cd agent-browser
+git clone https://github.com/Curling-AI/light-agent-browser
+cd light-agent-browser
 pnpm install
 pnpm build
 pnpm build:native
@@ -74,6 +87,8 @@ On Linux, install system dependencies:
 agent-browser install --with-deps
 ```
 
+`--with-deps` installs Chrome and its system libraries alongside Lightpanda.
+
 This exits nonzero if the package manager cannot install every required browser library.
 
 ## Updating
@@ -84,7 +99,7 @@ Upgrade to the latest version:
 agent-browser upgrade
 ```
 
-Detects your installation method (npm, Homebrew, or Cargo) and runs the appropriate update command automatically. Displays the version change on success, or informs you if you are already on the latest version.
+Detects your installation method (npm, pnpm, yarn, bun, or Cargo) and upgrades the light-agent-browser package automatically. Displays the version change on success, or informs you if you are already on the latest version.
 
 ## Doctor
 
@@ -162,7 +177,7 @@ agent-browser works with any AI agent out of the box. For richer context:
 Install the skill for your AI coding assistant:
 
 ```bash
-npx skills add vercel-labs/agent-browser
+npx skills add Curling-AI/light-agent-browser
 ```
 
 This works with Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Goose, OpenCode, and Windsurf. The skill is fetched from the repository and stays up to date automatically.

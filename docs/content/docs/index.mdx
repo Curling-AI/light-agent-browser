@@ -3,15 +3,15 @@ title: "agent-browser"
 navTitle: "Introduction"
 ---
 
-Browser automation CLI designed for AI agents. Compact text output minimizes context usage. 100% native Rust.
+Browser automation CLI designed for AI agents. Compact text output minimizes context usage. 100% native Rust. This is light-agent-browser, a fork of [agent-browser](https://github.com/vercel-labs/agent-browser) that uses [Lightpanda](/engines/lightpanda) by default; it installs the same `agent-browser` command.
 
 ```bash
-npm install -g agent-browser      # all platforms
-brew install agent-browser        # macOS
-agent-browser install             # Download Chrome (first time)
+npm install -g light-agent-browser # all platforms; installs the agent-browser command
+agent-browser install             # Download Lightpanda, the default engine (first time)
+agent-browser install --with-chrome # Also download Chrome (visual screenshots, --headed)
 
 # or try without installing
-npx agent-browser open example.com
+npx -p light-agent-browser agent-browser open example.com
 ```
 
 ## Features

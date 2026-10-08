@@ -55,7 +55,7 @@ export async function Header() {
         <nav className="flex items-center gap-4">
           <Search />
           <a
-            href="https://github.com/vercel-labs/agent-browser"
+            href="https://github.com/Curling-AI/light-agent-browser"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-sm text-neutral-500 hover:text-neutral-900 transition-colors dark:text-neutral-400 dark:hover:text-neutral-100"

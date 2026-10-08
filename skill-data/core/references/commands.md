@@ -120,6 +120,20 @@ agent-browser pdf output.pdf      # Save as PDF
 
 Headless Chromium screenshots hide native scrollbars for consistent image output. Pass `--hide-scrollbars false` when launching to keep native scrollbars visible.
 
+### Lightpanda screenshots
+
+Lightpanda (the default engine) has no layout engine. agent-browser serializes the current DOM (scripts removed, form values and CSSOM styles kept, passwords masked) with the page cookies, viewport, scroll position, and color scheme, then renders it in Chrome at the original URL. Selector, `--full`, `--annotate`, and JPEG screenshots all work.
+
+```bash
+agent-browser screenshot page.png                                  # auto: local Chrome if installed, else native
+agent-browser --screenshot-renderer chrome screenshot page.png     # require local Chrome
+agent-browser --screenshot-renderer native screenshot text.png     # Lightpanda text-only PNG
+agent-browser --screenshot-renderer http://renderer:9300 screenshot # remote renderer service
+agent-browser renderer serve --host 0.0.0.0 --port 9300            # run the shared renderer
+```
+
+`--json` responses include `renderer`: `chrome`, `remote`, or `lightpanda-text`. The remote renderer accepts `Authorization: Bearer $AGENT_BROWSER_RENDERER_TOKEN`; each screenshot forwards the caller's current token, so changing it needs no restart. Canvas pixels, video frames, and iframe state are not reproduced; use `--engine chrome` when they matter. With `--allowed-domains`, Chrome rendering is disabled (`auto` falls back to native) because the renderer would load resources outside the filter.
+
 ## Video Recording
 
 ```bash
@@ -452,6 +466,8 @@ agent-browser --proxy <url> ...       # Use proxy server
 agent-browser --proxy-bypass <hosts>  # Hosts to bypass proxy
 agent-browser --headers <json> ...    # HTTP headers scoped to URL's origin
 agent-browser --executable-path <p>   # Custom browser executable
+agent-browser --engine <name> ...     # lightpanda (default; falls back to chrome), chrome, obscura
+agent-browser --screenshot-renderer <m> # Lightpanda screenshots: auto, chrome, native, or renderer URL
 agent-browser --extension <path> ...  # Load browser extension (repeatable)
 agent-browser --ignore-https-errors   # Ignore SSL certificate errors
 agent-browser --ca-cert <path>        # Trust a CA for CLI requests, and in local Chromium on Linux (install --with-deps provides certutil)
@@ -546,6 +562,10 @@ agent-browser network route '*' --resource-type image,font --body '' # Stub imag
 ```bash
 AGENT_BROWSER_SESSION="mysession"            # Default session name
 AGENT_BROWSER_EXECUTABLE_PATH="/path/chrome" # Custom browser path
+AGENT_BROWSER_ENGINE="chrome"                # Engine: lightpanda (default), chrome, obscura
+AGENT_BROWSER_SCREENSHOT_RENDERER="auto"     # Lightpanda screenshots: auto, chrome, native, or renderer URL
+AGENT_BROWSER_RENDERER_TOKEN="secret"        # Bearer token for a remote renderer / renderer serve
+AGENT_BROWSER_LIGHTPANDA_VERSION="1.0.0"     # Lightpanda release downloaded by install
 AGENT_BROWSER_EXTENSIONS="/ext1,/ext2"       # Comma-separated extension paths
 AGENT_BROWSER_INIT_SCRIPTS="/a.js,/b.js"     # Comma-separated init script paths
 AGENT_BROWSER_ENABLE="react-devtools"        # Comma-separated built-in init script features

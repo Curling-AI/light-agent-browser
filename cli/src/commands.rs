@@ -328,6 +328,17 @@ fn parse_cookie_header(header: &str) -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
+/// Forwards the caller's `AGENT_BROWSER_RENDERER_TOKEN` so a remote screenshot
+/// renderer sees the current value even when the daemon was started earlier.
+/// The daemon strips it before broadcasting commands to stream clients.
+fn attach_renderer_token(cmd: &mut Value) {
+    if let Ok(token) = std::env::var("AGENT_BROWSER_RENDERER_TOKEN") {
+        if !token.is_empty() {
+            cmd["rendererToken"] = json!(token);
+        }
+    }
+}
+
 pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError> {
     let mut result = parse_command_inner(args, flags)?;
 
@@ -894,6 +905,10 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
             if let Some(ref dir) = flags.screenshot_dir {
                 cmd["screenshotDir"] = json!(dir);
             }
+            if let Some(ref renderer) = flags.screenshot_renderer {
+                cmd["renderer"] = json!(renderer);
+            }
+            attach_renderer_token(&mut cmd);
             if if_changed {
                 cmd["ifChanged"] = json!(true);
             }
@@ -1962,7 +1977,15 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
             }
         }
 
-        "diff" => parse_diff(&rest, &id),
+        "diff" => parse_diff(&rest, &id).map(|mut cmd| {
+            if cmd["action"] == "diff_screenshot" {
+                if let Some(ref renderer) = flags.screenshot_renderer {
+                    cmd["renderer"] = json!(renderer);
+                }
+                attach_renderer_token(&mut cmd);
+            }
+            cmd
+        }),
 
         // === Batch ===
         "batch" => {
@@ -3651,6 +3674,7 @@ mod tests {
             screenshot_dir: None,
             screenshot_quality: None,
             screenshot_format: None,
+            screenshot_renderer: None,
             idle_timeout: None,
             default_timeout: None,
             no_auto_dialog: false,

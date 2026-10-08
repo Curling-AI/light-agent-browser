@@ -354,10 +354,30 @@ fn install_fetches_manifest_with_explicit_and_native_trust() {
     let session = Session::new();
     let ca = session.ca("installer.pem", cert);
     let url = format!("http://127.0.0.1:{}", proxy.port);
+    // `--engine chrome` limits install to Chrome for Testing, the manifest
+    // this fixture serves (the default install fetches Lightpanda first).
     for (args, trusted) in [
-        (vec!["install"], false),
-        (vec!["--ca-cert", ca.to_str().unwrap(), "install"], true),
-        (vec!["--no-ca-cert", "--use-system-ca", "install"], true),
+        (vec!["--engine", "chrome", "install"], false),
+        (
+            vec![
+                "--engine",
+                "chrome",
+                "--ca-cert",
+                ca.to_str().unwrap(),
+                "install",
+            ],
+            true,
+        ),
+        (
+            vec![
+                "--engine",
+                "chrome",
+                "--no-ca-cert",
+                "--use-system-ca",
+                "install",
+            ],
+            true,
+        ),
     ] {
         let mut cmd = session.command();
         cmd.env("HTTPS_PROXY", &url);

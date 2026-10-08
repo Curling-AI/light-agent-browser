@@ -64,8 +64,8 @@ FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates libvulkan1 mesa-vulkan-drivers xvfb xauth \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g agent-browser \
-    && agent-browser install   # downloads Chrome for Testing
+RUN npm install -g light-agent-browser \
+    && agent-browser --engine chrome install   # downloads Chrome for Testing
 ```
 
 No real GPU or `/dev/dri` is required. To prefer a real GPU on a Linux machine that has working hardware Vulkan, override both the Vulkan driver and the adapter — the preset pins `--use-vulkan=swiftshader`, so overriding only the adapter still enumerates SwiftShader (user `--args` win over the preset):

@@ -3,6 +3,25 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.38.2 (light-agent-browser)
+
+<p className="text-[#888] text-sm">October 8, 2026</p>
+
+### New Features
+
+- **First light-agent-browser release** - Published to npm as `light-agent-browser`, a fork of agent-browser 0.38.2. It installs the same `agent-browser` command and keeps upstream commands, flags, environment variables, and config files
+- **Lightpanda as the default engine** - Local launches use Lightpanda unless `--engine` is set. Chrome is used automatically, with a warning, on Windows, when Lightpanda is not installed, with a non-Lightpanda `--executable-path`, or with Chrome-only options such as `--headed`, `--profile`, and `--extension`
+- **Lightpanda install** - `agent-browser install` downloads Lightpanda 1.0.0 (`AGENT_BROWSER_LIGHTPANDA_VERSION` overrides it). `--with-chrome` also installs Chrome, and `--engine chrome install` keeps the Chrome-only install
+- **Visual screenshots for Lightpanda** - Screenshots render the current Lightpanda DOM, cookies, and viewport in Chrome, with selector, full page, annotation, and JPEG support. `--screenshot-renderer` (or `AGENT_BROWSER_SCREENSHOT_RENDERER`) selects `auto`, `chrome`, `native`, or a remote renderer URL
+- **Shared screenshot renderer** - `agent-browser renderer serve` runs the renderer as an HTTP service with bearer token auth (`AGENT_BROWSER_RENDERER_TOKEN`), plus a container image and Kubernetes example in `docker/renderer/`
+
+### Improvements
+
+- **Upgrade** - `agent-browser upgrade` installs `light-agent-browser@latest`
+- **Response warnings** - Warnings now print for every command, including `open`
+
+---
+
 ## v0.38.2
 
 <p className="text-[#888] text-sm">October 1, 2026</p>

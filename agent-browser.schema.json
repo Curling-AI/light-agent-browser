@@ -196,8 +196,8 @@
     "engine": {
       "type": "string",
       "enum": ["chrome", "lightpanda", "obscura"],
-      "default": "chrome",
-      "description": "Browser engine to use. Obscura is experimental and does not support proxy bypass rules."
+      "default": "lightpanda",
+      "description": "Browser engine to use. Defaults to Lightpanda; when unset, Chrome is used automatically on Windows, when Lightpanda is not installed, or when a Chrome-only option is set. Obscura is experimental and does not support proxy bypass rules."
     },
     "screenshotDir": {
       "type": "string",
@@ -213,6 +213,10 @@
       "type": "string",
       "enum": ["png", "jpeg"],
       "description": "Screenshot format."
+    },
+    "screenshotRenderer": {
+      "type": "string",
+      "description": "Renderer for screenshots taken with the Lightpanda engine: auto (local Chrome when installed, else Lightpanda's text render), chrome, native, or an http(s):// URL of an `agent-browser renderer serve` deployment."
     },
     "idleTimeout": {
       "type": "string",
