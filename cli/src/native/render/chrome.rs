@@ -205,6 +205,27 @@ impl ChromeRenderer {
         }
         tokio::time::sleep(SETTLE_DELAY).await;
 
+        if request.output == "pdf" {
+            let mut params = request
+                .pdf
+                .clone()
+                .filter(|p| p.is_object())
+                .unwrap_or_else(|| json!({}));
+            // The response carries the PDF inline; streams cannot cross the wire.
+            params["transferMode"] = json!("ReturnAsBase64");
+            let pdf = client
+                .send_command("Page.printToPDF", Some(params), sid)
+                .await?;
+            let data = pdf
+                .get("data")
+                .and_then(|v| v.as_str())
+                .ok_or("Renderer returned no PDF data")?;
+            return Ok(RenderResponse {
+                data: data.to_string(),
+                annotations: Vec::new(),
+            });
+        }
+
         if !request.full_page && (request.scroll.x != 0.0 || request.scroll.y != 0.0) {
             let _ = client
                 .send_command(

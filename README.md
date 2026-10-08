@@ -1066,6 +1066,8 @@ agent-browser screenshot page.png               # Rendered by local Chrome when 
 agent-browser --screenshot-renderer native screenshot text.png
 ```
 
+PDFs use the same path: with Lightpanda, `agent-browser pdf` sends the serialized page to the renderer, which prints it with Chrome's `Page.printToPDF`, so the PDF keeps the page's layout and styles. `--screenshot-renderer` applies to both, `native` produces Lightpanda's own text-only PDF (selectable text and links, no CSS), and `--json` reports `data.renderer`. A renderer service from before PDF support returns an error instead of a PDF; update it.
+
 Limitations: the render reflects the DOM at capture time, so canvas pixels, video frames, closed shadow roots, and cross-origin iframe state are not reproduced. Iframes reload from the network. Element screenshots inside iframes are not supported. The renderer fetches subresources directly, not through `--proxy`. While `--allowed-domains` is active, Chrome rendering is disabled because it would load resources outside the filter: `auto` uses the native render and `chrome` or a renderer URL fails.
 
 ### Remote renderer

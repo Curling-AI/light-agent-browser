@@ -8161,15 +8161,22 @@ async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
         "preferCSSPageSize": cmd.get("preferCSSPageSize").and_then(|v| v.as_bool()).unwrap_or(false),
     });
 
-    let result = mgr
-        .client
-        .send_command("Page.printToPDF", Some(params), Some(&session_id))
-        .await?;
-
-    let data = result
-        .get("data")
-        .and_then(|v| v.as_str())
-        .ok_or("No PDF data returned")?;
+    let (data, rendered_by) = super::render::capture_pdf(
+        &state.screenshot_renderer,
+        &super::render::CaptureContext {
+            client: &mgr.client,
+            session_id: &session_id,
+            ref_map: &state.ref_map,
+            iframe_sessions: &state.iframe_sessions,
+            engine: &state.engine,
+            domain_filter_active: state.domain_filter.read().await.is_some(),
+            renderer_token: super::render::renderer_token_from_command(cmd),
+        },
+        params,
+        &super::render::RendererMode::from_command(cmd)?,
+    )
+    .await?;
+    let data = data.as_str();
 
     let path = cmd.get("path").and_then(|v| v.as_str());
     let save_path = match path {
@@ -8195,7 +8202,11 @@ async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
         .map_err(|e| format!("Failed to decode PDF: {}", e))?;
     std::fs::write(&save_path, &bytes).map_err(|e| format!("Failed to save PDF: {}", e))?;
 
-    Ok(json!({ "path": save_path }))
+    let mut response = json!({ "path": save_path });
+    if rendered_by != super::render::RenderedBy::Engine {
+        response["renderer"] = json!(rendered_by.as_str());
+    }
+    Ok(response)
 }
 
 // ---------------------------------------------------------------------------

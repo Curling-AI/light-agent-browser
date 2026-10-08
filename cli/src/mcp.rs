@@ -1046,7 +1046,10 @@ fn parity_tools() -> Vec<Value> {
             TOOL_PDF,
             "Save PDF",
             "Save the current page as PDF.",
-            json!({ "path": { "type": "string" } }),
+            json!({
+                "path": { "type": "string" },
+                "renderer": { "type": "string", "description": "Renderer for Lightpanda PDFs: auto (default), chrome, native (text only), or an http(s):// renderer URL. Ignored by the Chrome engine." }
+            }),
             &["path"],
         ),
         tool(
@@ -2249,7 +2252,7 @@ fn call_tool(params: Option<&Value>, config: &McpConfig) -> Result<Value, Protoc
         TOOL_WAIT_FOR_FUNCTION => call_wait_flag(arguments, Some("--fn"), "expression"),
         TOOL_WAIT_FOR_DOWNLOAD => call_wait_download(arguments),
         TOOL_SCREENSHOT => call_screenshot(arguments),
-        TOOL_PDF => call_one_string(arguments, "pdf", "path"),
+        TOOL_PDF => call_cli_tool(arguments, pdf_command_args(arguments)?, None),
         TOOL_GET_TEXT => call_get_selector(arguments, "text"),
         TOOL_GET_HTML => call_get_selector(arguments, "html"),
         TOOL_GET_VALUE => call_get_selector(arguments, "value"),
@@ -2474,6 +2477,17 @@ fn call_literal(arguments: &Value, parts: &[&str]) -> Result<Value, ProtocolErro
         parts.iter().map(|s| s.to_string()).collect(),
         None,
     )
+}
+
+fn pdf_command_args(arguments: &Value) -> Result<Vec<String>, ProtocolError> {
+    let mut args = Vec::new();
+    if let Some(renderer) = optional_string(arguments, "renderer")? {
+        args.push("--screenshot-renderer".to_string());
+        args.push(renderer);
+    }
+    args.push("pdf".to_string());
+    args.push(required_string(arguments, "path")?);
+    Ok(args)
 }
 
 fn call_one_string(arguments: &Value, command: &str, key: &str) -> Result<Value, ProtocolError> {
@@ -4252,6 +4266,17 @@ mod tests {
                 arguments["interactive"].as_bool().unwrap_or(true)
             );
         }
+    }
+
+    #[test]
+    fn pdf_renderer_matches_cli_parser() {
+        let args = pdf_command_args(&json!({ "path": "out.pdf", "renderer": "native" })).unwrap();
+        let flags = crate::flags::parse_flags(&args);
+        let command =
+            crate::commands::parse_command(&crate::flags::clean_args(&args), &flags).unwrap();
+        assert_eq!(command["action"], "pdf");
+        assert_eq!(command["path"], "out.pdf");
+        assert_eq!(command["renderer"], "native");
     }
 
     #[test]

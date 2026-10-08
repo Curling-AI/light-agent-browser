@@ -327,7 +327,7 @@ Prefer `--if-changed` for repeated captures: skipping unchanged images is the mo
 
 Headless Chromium screenshots hide native scrollbars for consistent image output. Pass `--hide-scrollbars false` when launching to keep native scrollbars visible.
 
-With the default Lightpanda engine, screenshots are rendered in Chrome from the current DOM, cookies, and viewport (`--screenshot-renderer auto`, the default, uses a local Chrome when installed). Without Chrome, `auto` falls back to Lightpanda's text-only PNG; use `--screenshot-renderer http://host:9300` for a shared `agent-browser renderer serve` deployment. `--json` reports `data.renderer`. If a screenshot misses canvas, video, or iframe content, relaunch with `--engine chrome`. See [references/commands.md](references/commands.md#screenshots-and-pdf).
+With the default Lightpanda engine, screenshots are rendered in Chrome from the current DOM, cookies, and viewport (`--screenshot-renderer auto`, the default, uses a local Chrome when installed). Without Chrome, `auto` falls back to Lightpanda's text-only PNG; use `--screenshot-renderer http://host:9300` for a shared `agent-browser renderer serve` deployment. `agent-browser pdf` uses the same renderer. `--json` reports `data.renderer`. If a screenshot misses canvas, video, or iframe content, relaunch with `--engine chrome`. See [references/commands.md](references/commands.md#screenshots-and-pdf).
 
 `--annotate` is designed for multimodal models: each label `[N]` maps to ref `@eN`.
 

@@ -922,7 +922,12 @@ fn parse_command_inner(args: &[String], flags: &Flags) -> Result<Value, ParseErr
                 context: "pdf".to_string(),
                 usage: "pdf <path>",
             })?;
-            Ok(json!({ "id": id, "action": "pdf", "path": path }))
+            let mut cmd = json!({ "id": id, "action": "pdf", "path": path });
+            if let Some(ref renderer) = flags.screenshot_renderer {
+                cmd["renderer"] = json!(renderer);
+            }
+            attach_renderer_token(&mut cmd);
+            Ok(cmd)
         }
 
         // === Snapshot ===

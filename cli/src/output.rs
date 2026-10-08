@@ -2192,7 +2192,7 @@ Options:
                        (or AGENT_BROWSER_SCREENSHOT_QUALITY env)
   --screenshot-format <fmt>  Image format: png (default) or jpeg
                        (or AGENT_BROWSER_SCREENSHOT_FORMAT env)
-  --screenshot-renderer <mode>  Renderer for Lightpanda screenshots
+  --screenshot-renderer <mode>  Renderer for Lightpanda screenshots and PDFs
                        (or AGENT_BROWSER_SCREENSHOT_RENDERER env):
                        auto (default): local Chrome if installed, else native
                        chrome: local headless Chrome, launched on first use
@@ -2229,6 +2229,15 @@ Usage: agent-browser pdf <path>
 
 Saves the current page as a PDF file.
 
+With the Lightpanda engine, the PDF is printed by the same Chrome renderer
+as screenshots, from the current DOM and cookies, so it keeps the page's
+layout and styles. --screenshot-renderer native uses Lightpanda's own
+text-only PDF. JSON output reports the renderer in data.renderer.
+
+Options:
+  --screenshot-renderer <mode>  auto (default), chrome, native, or a renderer
+                       URL (or AGENT_BROWSER_SCREENSHOT_RENDERER env)
+
 Global Options:
   --json               Output as JSON
   --session <name>     Use specific session
@@ -2236,6 +2245,7 @@ Global Options:
 Examples:
   agent-browser pdf ./page.pdf
   agent-browser pdf ~/Documents/report.pdf
+  agent-browser --screenshot-renderer native pdf ./text-only.pdf
 "##
         }
 
@@ -4111,7 +4121,7 @@ Options:
   --screenshot-dir <path>    Default screenshot output directory (or AGENT_BROWSER_SCREENSHOT_DIR)
   --screenshot-quality <n>   JPEG quality 0-100; ignored for PNG (or AGENT_BROWSER_SCREENSHOT_QUALITY)
   --screenshot-format <fmt>  Screenshot format: png, jpeg (or AGENT_BROWSER_SCREENSHOT_FORMAT)
-  --screenshot-renderer <m>  Lightpanda screenshot renderer: auto (default), chrome, native,
+  --screenshot-renderer <m>  Lightpanda screenshot/PDF renderer: auto (default), chrome, native,
                              or http(s):// renderer URL (or AGENT_BROWSER_SCREENSHOT_RENDERER)
   --input-mode <mode>        Session pointer movement: instant (default), smooth, human
   --headed                   Show browser window (not headless) (or AGENT_BROWSER_HEADED env)
@@ -4261,7 +4271,7 @@ Environment:
   AGENT_BROWSER_SCREENSHOT_DIR   Default screenshot output directory
   AGENT_BROWSER_SCREENSHOT_QUALITY JPEG quality 0-100
   AGENT_BROWSER_SCREENSHOT_FORMAT Screenshot format: png, jpeg
-  AGENT_BROWSER_SCREENSHOT_RENDERER Lightpanda screenshot renderer: auto, chrome, native, or URL
+  AGENT_BROWSER_SCREENSHOT_RENDERER Lightpanda screenshot/PDF renderer: auto, chrome, native, or URL
   AGENT_BROWSER_RENDERER_TOKEN   Bearer token sent to a remote renderer (forwarded on each
                                  screenshot) and required by `renderer serve` when set
   AI_GATEWAY_URL                 Vercel AI Gateway base URL (default: https://ai-gateway.vercel.sh)
