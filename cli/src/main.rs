@@ -6,6 +6,7 @@ mod connection;
 mod doctor;
 mod flags;
 mod install;
+mod lightpanda_install;
 mod mcp;
 mod native;
 mod output;
@@ -1367,6 +1368,33 @@ fn run_close_all(flags: &Flags) {
     }
 }
 
+/// `agent-browser renderer serve [--host H] [--port P] [--concurrency N]`
+fn run_renderer(args: &[String], flags: &Flags) {
+    let serve_at = args.iter().position(|a| a == "serve");
+    let Some(serve_at) = serve_at else {
+        eprintln!(
+            "{} Usage: agent-browser renderer serve [--host <host>] [--port <port>] [--concurrency <n>] [--max-body-mb <mb>]",
+            color::error_indicator()
+        );
+        exit(1);
+    };
+    let mut options = match native::render::server::parse_serve_args(&args[serve_at + 1..]) {
+        Ok(options) => options,
+        Err(e) => {
+            eprintln!("{} {}", color::error_indicator(), e);
+            exit(1);
+        }
+    };
+    if options.executable_path.is_none() {
+        options.executable_path = flags.executable_path.clone();
+    }
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+    if let Err(e) = rt.block_on(native::render::server::run(options)) {
+        eprintln!("{} {}", color::error_indicator(), e);
+        exit(1);
+    }
+}
+
 fn main() {
     // Rust ignores SIGPIPE by default, causing println! to panic on broken pipes.
     // Reset to SIG_DFL so the OS terminates the process cleanly instead.
@@ -1444,7 +1472,18 @@ fn main() {
     // Handle install separately
     if clean.first().map(|s| s.as_str()) == Some("install") {
         let with_deps = args.iter().any(|a| a == "--with-deps" || a == "-d");
-        run_install(with_deps);
+        let with_chrome = args.iter().any(|a| a == "--with-chrome");
+        let chrome_only = flags
+            .engine
+            .as_deref()
+            .is_some_and(|e| e.eq_ignore_ascii_case("chrome"));
+        run_install(with_deps, with_chrome, chrome_only);
+        return;
+    }
+
+    // Handle the standalone screenshot renderer service (no daemon)
+    if clean.first().map(|s| s.as_str()) == Some("renderer") {
+        run_renderer(&args, &flags);
         return;
     }
 
@@ -2118,8 +2157,13 @@ fn main() {
                 }
                 exit(1);
             }
-            Ok(_) => {
-                // Launch succeeded
+            Ok(resp) => {
+                // Launch succeeded. Surface launch-time notices such as the
+                // default engine falling back to Chrome; stderr keeps --json
+                // output clean.
+                if let Some(warning) = resp.warning {
+                    eprintln!("{} {}", color::warning_indicator(), warning);
+                }
             }
         }
     }

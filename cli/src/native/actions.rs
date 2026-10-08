@@ -640,6 +640,12 @@ pub struct DaemonState {
     network_auto_attach_installed: bool,
     /// Browser engine name (e.g. "chrome", "lightpanda") for observability.
     pub engine: String,
+    /// One-shot warning attached to the response of the command that
+    /// launched the browser (e.g. the default engine fell back to Chrome).
+    pub pending_launch_warning: Option<String>,
+    /// Screenshot renderer for engines without a layout engine (Lightpanda).
+    /// Holds a lazily launched Chrome when rendering locally.
+    pub screenshot_renderer: super::render::ScreenshotRenderer,
     /// Default timeout for wait operations, from AGENT_BROWSER_DEFAULT_TIMEOUT env var.
     pub default_timeout_ms: u64,
     /// Last viewport settings (width, height, deviceScaleFactor, mobile),
@@ -760,6 +766,8 @@ impl DaemonState {
             effective_ca_cert: None,
             network_auto_attach_installed: false,
             engine: env::var("AGENT_BROWSER_ENGINE").unwrap_or_else(|_| "chrome".to_string()),
+            pending_launch_warning: None,
+            screenshot_renderer: super::render::ScreenshotRenderer::default(),
             // README documents 25s, intentionally below the CLI's 30s IPC
             // read timeout so the daemon reports a proper timeout error
             // instead of the client dying with EAGAIN and retrying.
@@ -2710,7 +2718,8 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
             || cmd.get("restoreSave").is_some()
             || cmd.get("restoreCheckUrl").is_some()
             || cmd.get("restoreCheckText").is_some()
-            || cmd.get("restoreCheckFn").is_some();
+            || cmd.get("restoreCheckFn").is_some()
+            || cmd.get("rendererToken").is_some();
         let cmd_for_broadcast = if has_internal_fields {
             broadcast_cmd = cmd.clone();
             if let Some(obj) = broadcast_cmd.as_object_mut() {
@@ -2721,6 +2730,7 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
                 obj.remove("restoreCheckUrl");
                 obj.remove("restoreCheckText");
                 obj.remove("restoreCheckFn");
+                obj.remove("rendererToken");
             }
             &broadcast_cmd
         } else {
@@ -3208,6 +3218,11 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
                     err, hint
                 )),
             );
+        }
+    }
+    if let Some(warning) = state.pending_launch_warning.take() {
+        if let Some(obj) = resp.as_object_mut() {
+            obj.entry("warning").or_insert_with(|| json!(warning));
         }
     }
     inject_lifecycle(
@@ -4264,6 +4279,11 @@ async fn auto_launch_inner(
     })?;
 
     apply_launch_mutator_plugins(state, &mut options, plugins).await?;
+    let engine_choice = super::engine::resolve_launch_engine(engine.as_deref(), &options);
+    state.pending_launch_warning = engine_choice.warning();
+    let engine = Some(engine_choice.engine);
+    state.engine = engine.clone().unwrap_or_default();
+    write_engine_file(&state.session_id, &state.engine);
     validate_ca_cert_launch_mode(&options, engine.as_deref(), false)?;
     ensure_allowed_domains_supported_for_launch(AllowedDomainsLaunchSupport {
         allowed_domains: &allowed_domains,
@@ -5039,6 +5059,14 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
             .await?;
         validate_ca_cert_launch_mode(&launch_options, engine.as_deref(), false)?;
     }
+    let mut launch_warning = None;
+    let engine = if local_launch {
+        let choice = super::engine::resolve_launch_engine(engine.as_deref(), &launch_options);
+        launch_warning = choice.warning();
+        Some(choice.engine)
+    } else {
+        engine
+    };
     ensure_allowed_domains_supported_for_launch(AllowedDomainsLaunchSupport {
         allowed_domains: &allowed_domains,
         cdp_url,
@@ -5283,6 +5311,7 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
     }
 
     state.engine = engine.as_deref().unwrap_or("chrome").to_string();
+    state.pending_launch_warning = launch_warning;
     write_engine_file(&state.session_id, &state.engine);
     write_extensions_file_from_paths(&state.session_id, launch_options.extensions.as_deref());
     state.reset_input_state();
@@ -5675,6 +5704,7 @@ async fn handle_evaluate(cmd: &Value, state: &DaemonState) -> Result<Value, Stri
 async fn handle_close(state: &mut DaemonState) -> Result<Value, String> {
     let save_result = auto_save_restore_state(state).await;
     close_all_browser_backends(state).await?;
+    state.screenshot_renderer.shutdown().await;
 
     // Stop background Fetch handler
     if let Some(task) = state.fetch_handler_task.take() {
@@ -6062,6 +6092,8 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
             .map(String::from),
     };
 
+    let renderer_mode = super::render::RendererMode::from_command(cmd)?;
+    let mut rendered_by = super::render::RenderedBy::Engine;
     let (session_id, result) = if let Some(wb) = state
         .webdriver_backend
         .as_ref()
@@ -6108,14 +6140,22 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
             .await?;
         }
 
-        let result = screenshot::take_screenshot(
-            &mgr.client,
-            &session_id,
-            &state.ref_map,
+        let (result, by) = super::render::capture_screenshot(
+            &state.screenshot_renderer,
+            &super::render::CaptureContext {
+                client: &mgr.client,
+                session_id: &session_id,
+                ref_map: &state.ref_map,
+                iframe_sessions: &state.iframe_sessions,
+                engine: &state.engine,
+                domain_filter_active: state.domain_filter.read().await.is_some(),
+                renderer_token: super::render::renderer_token_from_command(cmd),
+            },
             &options,
-            &state.iframe_sessions,
+            &renderer_mode,
         )
         .await?;
+        rendered_by = by;
 
         (session_id, result)
     };
@@ -6135,6 +6175,9 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
     if !result.annotations.is_empty() {
         response["annotations"] = serde_json::to_value(&result.annotations)
             .map_err(|e| format!("Failed to serialize annotations: {}", e))?;
+    }
+    if rendered_by != super::render::RenderedBy::Engine {
+        response["renderer"] = json!(rendered_by.as_str());
     }
 
     Ok(response)
@@ -11166,12 +11209,19 @@ async fn handle_diff_screenshot(cmd: &Value, state: &DaemonState) -> Result<Valu
         output_dir: None,
     };
 
-    let result = screenshot::take_screenshot(
-        &mgr.client,
-        &session_id,
-        &state.ref_map,
+    let (result, _) = super::render::capture_screenshot(
+        &state.screenshot_renderer,
+        &super::render::CaptureContext {
+            client: &mgr.client,
+            session_id: &session_id,
+            ref_map: &state.ref_map,
+            iframe_sessions: &state.iframe_sessions,
+            engine: &state.engine,
+            domain_filter_active: state.domain_filter.read().await.is_some(),
+            renderer_token: super::render::renderer_token_from_command(cmd),
+        },
         &options,
-        &state.iframe_sessions,
+        &super::render::RendererMode::from_command(cmd)?,
     )
     .await?;
 

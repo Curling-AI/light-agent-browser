@@ -5,11 +5,40 @@ navTitle: "Lightpanda"
 
 [Lightpanda](https://lightpanda.io/) is a headless browser engine built from scratch in Zig for machines. It starts instantly, uses 10x less memory than Chrome, and executes 10x faster.
 
-agent-browser manages Lightpanda the same way it manages Chrome -- spawning the process, connecting via CDP, and shutting it down. All downstream commands (snapshot, click, fill, screenshot, etc.) work through the same CDP protocol path.
+Lightpanda is the default engine. agent-browser manages Lightpanda the same way it manages Chrome: it spawns the process, connects via CDP, and shuts it down. All downstream commands (snapshot, click, fill, screenshot, etc.) work through the same CDP protocol path.
 
 ## Installation
 
-Install the Lightpanda binary before using it with agent-browser:
+`agent-browser install` downloads Lightpanda from its GitHub releases into `~/.agent-browser/browsers/lightpanda-<version>/lightpanda`:
+
+```bash
+agent-browser install                 # Lightpanda only
+agent-browser install --with-chrome   # Lightpanda plus Chrome for Testing
+agent-browser install --with-deps     # Lightpanda plus Chrome and its Linux system dependencies
+```
+
+Prebuilt binaries are downloaded for macOS and Linux on x86_64 and ARM64. On Windows, which has no Lightpanda build, `install` installs Chrome instead.
+
+The pinned release is `1.0.0`. Set `AGENT_BROWSER_LIGHTPANDA_VERSION` to install a different release. The value `nightly` always downloads a fresh build:
+
+```bash
+AGENT_BROWSER_LIGHTPANDA_VERSION=nightly agent-browser install
+```
+
+Installing Chrome as well (`--with-chrome` or `--with-deps`) is recommended: Chrome renders [screenshots](#screenshots) of Lightpanda pages and serves sessions that need a Chrome-only option.
+
+### Binary discovery
+
+agent-browser looks for the Lightpanda binary in this order:
+
+1. `lightpanda` in `PATH`
+2. `~/.lightpanda/lightpanda`
+3. `~/.local/bin/lightpanda`
+4. The `agent-browser install` directory (`~/.agent-browser/browsers/lightpanda-<version>/`)
+
+### Manual installation
+
+You can also install the Lightpanda binary yourself:
 
 <table>
   <thead>
@@ -33,7 +62,15 @@ See the [Lightpanda installation docs](https://lightpanda.io/docs/open-source/in
 
 ## Usage
 
-Use the `--engine` flag to select Lightpanda:
+No flag is needed. Once Lightpanda is installed, agent-browser uses it by default:
+
+```bash
+agent-browser open example.com
+agent-browser snapshot
+agent-browser screenshot
+```
+
+To pin the engine explicitly, use the `--engine` flag:
 
 ```bash
 agent-browser --engine lightpanda open example.com
@@ -41,7 +78,7 @@ agent-browser --engine lightpanda snapshot
 agent-browser --engine lightpanda screenshot
 ```
 
-Or set it as the default via environment variable:
+Or set it via environment variable:
 
 ```bash
 export AGENT_BROWSER_ENGINE=lightpanda
@@ -56,13 +93,39 @@ Or in your `agent-browser.json` config:
 }
 ```
 
+## Engine selection and Chrome fallback
+
+When you pass `--engine` (or set `AGENT_BROWSER_ENGINE` or `engine` in config), that engine is always used. Without an explicit engine, agent-browser launches Lightpanda unless it cannot serve the launch. In that case it uses Chrome and prints a warning naming the reason:
+
+<table>
+  <thead>
+    <tr><th>Reason</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Unsupported platform</td><td>The platform has no Lightpanda build (Windows)</td></tr>
+    <tr><td>Not installed</td><td>Lightpanda was not found. Run <code>agent-browser install</code> to download it</td></tr>
+    <tr><td>Non-Lightpanda executable</td><td><code>--executable-path</code> points at a binary whose file name does not contain <code>lightpanda</code></td></tr>
+    <tr><td>Chrome-only option</td><td>One of <code>--headed</code>, <code>--profile</code>, <code>--extension</code>, <code>--state</code>, <code>--allow-file-access</code>, <code>--webgpu</code>, <code>--ca-cert</code>, or <code>--args</code> is set</td></tr>
+  </tbody>
+</table>
+
+`--cdp`, `--auto-connect`, and `--provider` attach to an existing browser and are unaffected by engine selection.
+
+Pass `--engine chrome` (or set `"engine": "chrome"` in config) to keep the previous Chrome default and silence the warning:
+
+```bash
+agent-browser --engine chrome open example.com
+```
+
 ## Custom Binary Path
 
-If the `lightpanda` binary is not in your `PATH`, use `--executable-path`:
+If the `lightpanda` binary is not in one of the discovery locations, use `--executable-path`:
 
 ```bash
 agent-browser --engine lightpanda --executable-path /path/to/lightpanda open example.com
 ```
+
+Without `--engine lightpanda`, the binary's file name must contain `lightpanda`. Otherwise agent-browser treats the path as a Chrome executable.
 
 ## Differences from Chrome
 
@@ -78,11 +141,155 @@ Lightpanda is a purpose-built headless engine. Some Chrome-specific features are
     <tr><td>Storage state (<code>--state</code>)</td><td>Not supported</td></tr>
     <tr><td>File access (<code>--allow-file-access</code>)</td><td>Not supported</td></tr>
     <tr><td>Headed mode (<code>--headed</code>)</td><td>Not applicable (headless only)</td></tr>
-    <tr><td>Screenshots</td><td>Depends on Lightpanda CDP support</td></tr>
+    <tr><td>WebGPU (<code>--webgpu</code>)</td><td>Not supported</td></tr>
+    <tr><td>CA certificates (<code>--ca-cert</code>)</td><td>Not supported</td></tr>
+    <tr><td>Custom launch args (<code>--args</code>)</td><td>Not supported</td></tr>
+    <tr><td>Screenshots</td><td>Rendered by Chrome from the Lightpanda DOM (see <a href="#screenshots">Screenshots</a>)</td></tr>
   </tbody>
 </table>
 
-agent-browser returns a clear error if you combine `--engine lightpanda` with unsupported flags.
+When the engine is the default, these options switch the launch to Chrome with a warning. agent-browser returns a clear error if you combine `--engine lightpanda` with unsupported flags.
+
+## Screenshots
+
+Lightpanda has no layout engine, so its own `Page.captureScreenshot` only draws the page text and only produces PNG. To get a real screenshot, agent-browser renders the Lightpanda page in Chrome:
+
+1. It serializes the current Lightpanda DOM. Scripts and inline `on*` event handlers are removed, form values are kept, rules inserted through the CSSOM are inlined, and password values are masked.
+2. It collects the page cookies (`Network.getCookies` for the page URL), the viewport, the scroll position, and the `prefers-color-scheme` setting.
+3. Chrome loads the original URL with the document request intercepted and answered with the serialized DOM, so relative URLs resolve and cookies apply as they would on the live page.
+
+Selector screenshots (CSS selectors or `@ref`), `--full`, `--annotate`, and JPEG output all work:
+
+```bash
+agent-browser open https://example.com          # Lightpanda
+agent-browser screenshot page.png               # Rendered by local Chrome when available
+agent-browser screenshot @e3 button.png         # Element screenshot by ref
+agent-browser screenshot --full --annotate      # Full page with numbered labels
+agent-browser --screenshot-renderer native screenshot text.png
+```
+
+With `--json`, the response includes `data.renderer`, which reports how the image was produced:
+
+<table>
+  <thead>
+    <tr><th>Value</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>chrome</code></td><td>Rendered by a local headless Chrome</td></tr>
+    <tr><td><code>remote</code></td><td>Rendered by a remote renderer service</td></tr>
+    <tr><td><code>lightpanda-text</code></td><td>Lightpanda's own text-only render</td></tr>
+  </tbody>
+</table>
+
+The field is absent when the session uses the Chrome engine.
+
+### Renderer modes
+
+Choose the renderer with `--screenshot-renderer <mode>`, the `AGENT_BROWSER_SCREENSHOT_RENDERER` environment variable, or `screenshotRenderer` in config. It applies to `screenshot` and `diff screenshot` and is ignored by the Chrome engine.
+
+<table>
+  <thead>
+    <tr><th>Mode</th><th>Behavior</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>auto</code> (default)</td><td>Local Chrome when one is installed, otherwise <code>native</code>. Always <code>native</code> while <code>--allowed-domains</code> is active</td></tr>
+    <tr><td><code>chrome</code></td><td>Local headless Chrome, launched on the first screenshot and kept until <code>close</code>. Fails when Chrome is not installed</td></tr>
+    <tr><td><code>native</code></td><td>Lightpanda's text-only PNG render. No extra dependencies. JPEG is rejected</td></tr>
+    <tr><td><code>http(s)://host:port</code></td><td>A remote renderer started with <code>agent-browser renderer serve</code> (see <a href="#remote-renderer">Remote renderer</a>)</td></tr>
+  </tbody>
+</table>
+
+```json
+{
+  "screenshotRenderer": "chrome"
+}
+```
+
+### Domain allowlist and proxy
+
+While `--allowed-domains` is active, Chrome rendering of Lightpanda screenshots is disabled, because the renderer would load page subresources outside the domain filter. In that case `auto` uses the native Lightpanda text render, and `chrome` or a renderer URL returns an error suggesting `--screenshot-renderer native` or `--engine chrome`.
+
+The renderer (local or remote) fetches subresources such as stylesheets, images, and fonts directly. It does not route them through the session's `--proxy`. Use `--engine chrome` when every request must go through the proxy.
+
+### Limitations
+
+The render reflects the DOM at capture time, not a live Chrome session:
+
+- Canvas pixels, video frames, closed shadow roots, and cross-origin iframe state are not reproduced.
+- Iframes reload from the network.
+- Element screenshots inside iframes are not supported.
+
+Use `--engine chrome` when these matter.
+
+## Remote renderer
+
+Run the renderer as a shared service so agent machines only need Lightpanda. `agent-browser renderer serve` starts an HTTP service backed by headless Chrome:
+
+```bash
+AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser renderer serve --host 0.0.0.0 --port 9300
+```
+
+<table>
+  <thead>
+    <tr><th>Option</th><th>Environment variable</th><th>Default</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>--host &lt;host&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_HOST</code></td><td><code>127.0.0.1</code></td></tr>
+    <tr><td><code>--port &lt;port&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_PORT</code></td><td><code>9300</code></td></tr>
+    <tr><td><code>--concurrency &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_CONCURRENCY</code></td><td><code>4</code> parallel renders</td></tr>
+    <tr><td><code>--max-body-mb &lt;mb&gt;</code></td><td></td><td><code>32</code> MB maximum request size</td></tr>
+    <tr><td><code>--executable-path &lt;path&gt;</code></td><td><code>AGENT_BROWSER_EXECUTABLE_PATH</code></td><td>Auto-discovered Chrome</td></tr>
+  </tbody>
+</table>
+
+The service exposes two endpoints:
+
+<table>
+  <thead>
+    <tr><th>Endpoint</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>GET /healthz</code></td><td>Health probe. Returns <code>{'{"ok":true}'}</code></td></tr>
+    <tr><td><code>POST /v1/render</code></td><td>Accepts a JSON render request and returns <code>{'{"data": "<base64 image>", "annotations": [...]}'}</code>. Requires <code>Authorization: Bearer &lt;token&gt;</code> when <code>AGENT_BROWSER_RENDERER_TOKEN</code> is set</td></tr>
+  </tbody>
+</table>
+
+Each render runs in an isolated Chrome browser context, so requests never share cookies or storage.
+
+Point agents at the service:
+
+```bash
+export AGENT_BROWSER_SCREENSHOT_RENDERER=http://renderer.internal:9300
+export AGENT_BROWSER_RENDERER_TOKEN=change-me
+agent-browser screenshot
+```
+
+Clients send the token from `AGENT_BROWSER_RENDERER_TOKEN`. Each screenshot forwards the caller's current value to the session daemon (falling back to the daemon's own environment), so changing it needs no restart. The token is stripped from command events shown in the dashboard.
+
+Every renderer setting has an environment variable, so an orchestrator can configure agents without flags: set `AGENT_BROWSER_SCREENSHOT_RENDERER=http://agent-browser-renderer:9300` and `AGENT_BROWSER_RENDERER_TOKEN` for the CLI or for `agent-browser mcp`. Precedence is flag, then environment variable, then `screenshotRenderer` in config.
+
+### Security
+
+Render requests contain the page HTML and its cookies. Treat the renderer like any service that handles session credentials:
+
+- Keep it on a private network.
+- Set `AGENT_BROWSER_RENDERER_TOKEN` on the server. `renderer serve` prints a warning when it binds to a non-loopback host without a token.
+- Use TLS (for example, through your ingress) when traffic leaves the host.
+
+### Container image
+
+A container image and a Kubernetes example live in [`docker/renderer/`](https://github.com/Curling-AI/light-agent-browser/tree/main/docker/renderer). Build and run the image from the repository root:
+
+```bash
+docker build -f docker/renderer/Dockerfile -t agent-browser-renderer .
+docker run --rm -p 9300:9300 -e AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser-renderer
+```
+
+For Kubernetes, start from `docker/renderer/kubernetes.yaml`.
+
+### MCP
+
+The `agent_browser_screenshot` and `agent_browser_diff_screenshot` MCP tools accept a `renderer` argument with the same values as `--screenshot-renderer`. `renderer serve` is a long-running service, so it is intentionally not exposed as an MCP tool.
 
 ## When to Use Lightpanda
 

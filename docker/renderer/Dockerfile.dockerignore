@@ -1,0 +1,4 @@
+# Only the Rust crate is needed to build the renderer image.
+*
+!cli/
+cli/target/

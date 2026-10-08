@@ -1089,6 +1089,90 @@ async fn e2e_lightpanda_auto_launch_can_open_page() {
 }
 
 #[tokio::test]
+#[ignore]
+async fn e2e_lightpanda_screenshot_renderers() {
+    let lightpanda_bin = match std::env::var("LIGHTPANDA_BIN") {
+        Ok(path) if !path.is_empty() => path,
+        _ => return,
+    };
+    if crate::native::cdp::chrome::find_chrome().is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(
+        &json!({
+            "id": "1",
+            "action": "launch",
+            "headless": true,
+            "engine": "lightpanda",
+            "executablePath": lightpanda_bin,
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://example.com" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    for (id, renderer, extra, expected) in [
+        ("3", "chrome", json!({}), "chrome"),
+        ("4", "chrome", json!({ "selector": "p" }), "chrome"),
+        ("5", "chrome", json!({ "annotate": true }), "chrome"),
+        (
+            "6",
+            "chrome",
+            json!({ "format": "jpeg", "fullPage": true }),
+            "chrome",
+        ),
+        ("7", "native", json!({}), "lightpanda-text"),
+    ] {
+        let path = dir.path().join(format!("shot-{id}.img"));
+        let mut cmd = json!({
+            "id": id,
+            "action": "screenshot",
+            "path": path.to_str().unwrap(),
+            "renderer": renderer,
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            cmd[key] = value.clone();
+        }
+        let resp = execute_command(&cmd, &mut state).await;
+        assert_success(&resp);
+        let data = get_data(&resp);
+        assert_eq!(data["renderer"], expected, "{cmd}");
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 100, "{cmd}: image too small");
+        if extra.get("annotate").is_some() {
+            assert!(data["annotations"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty()));
+        }
+    }
+
+    // Render markers never leak into the live Lightpanda DOM.
+    let resp = execute_command(
+        &json!({
+            "id": "8",
+            "action": "evaluate",
+            "script": "document.querySelectorAll('[data-agent-browser-ref],[data-agent-browser-target]').length",
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], 0);
+
+    let resp = execute_command(&json!({ "id": "9", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+#[tokio::test]
 async fn test_obscura_launch_uses_request_proxy_bypass() {
     let env = EnvGuard::new(&["AGENT_BROWSER_PROXY_BYPASS"]);
     env.set("AGENT_BROWSER_PROXY_BYPASS", "stale-daemon-value");

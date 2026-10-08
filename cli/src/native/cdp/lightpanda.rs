@@ -140,7 +140,8 @@ pub fn find_lightpanda() -> Option<PathBuf> {
         }
     }
 
-    None
+    // Installed by `agent-browser install`.
+    crate::lightpanda_install::find_installed_lightpanda()
 }
 
 pub async fn launch_lightpanda(

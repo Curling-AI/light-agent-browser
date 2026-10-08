@@ -43,7 +43,8 @@ jobs:
           echo "Sandbox package version: $SANDBOX_VERSION"
           echo "Eve package version: $EVE_VERSION"
 
-          NPM_VERSION=$(npm view agent-browser version 2>/dev/null || echo "0.0.0")
+          # This fork publishes as light-agent-browser (the command stays agent-browser).
+          NPM_VERSION=$(npm view light-agent-browser version 2>/dev/null || echo "0.0.0")
           SANDBOX_NPM_VERSION=$(npm view @agent-browser/sandbox version 2>/dev/null || echo "0.0.0")
           EVE_NPM_VERSION=$(npm view @agent-browser/eve version 2>/dev/null || echo "0.0.0")
           echo "npm version: $NPM_VERSION"
@@ -69,6 +70,9 @@ jobs:
               echo "needs_github_release=true" >> "$GITHUB_OUTPUT"
             fi
           fi
+          # The @agent-browser scope belongs to upstream; the fork never publishes it.
+          SANDBOX_NPM_VERSION="$SANDBOX_VERSION"
+          EVE_NPM_VERSION="$EVE_VERSION"
           if [ "$SANDBOX_VERSION" != "$SANDBOX_NPM_VERSION" ]; then
             echo "Sandbox package version changed: $SANDBOX_NPM_VERSION -> $SANDBOX_VERSION"
             echo "should_publish_sandbox=true" >> "$GITHUB_OUTPUT"
@@ -321,11 +325,15 @@ jobs:
           fi
           echo "All 7 platform binaries present and valid"
 
-      - name: Publish agent-browser
+      - name: Publish light-agent-browser
         if: needs.check-release.outputs.should_release == 'true'
         env:
-          PACKAGE_NAME: agent-browser
+          PACKAGE_NAME: light-agent-browser
           VERSION: ${{ needs.check-release.outputs.version }}
+          # Needed for the first publish of the package. Once npm trusted
+          # publishing is configured for this workflow, the secret can be
+          # removed and OIDC (id-token) is used instead.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           if pnpm view "${PACKAGE_NAME}@${VERSION}" version >/dev/null 2>&1; then

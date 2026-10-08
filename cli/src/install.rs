@@ -245,7 +245,7 @@ fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("Failed to create HTTP client: {}", format_reqwest_error(&e)))
 }
 
-async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
+pub(crate) async fn download_bytes(url: &str) -> Result<Vec<u8>, String> {
     let client = http_client()?;
     let max_retries = 3;
     let mut last_err = String::new();
@@ -397,7 +397,76 @@ fn extract_zip(bytes: Vec<u8>, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn run_install(with_deps: bool) {
+/// Installs Lightpanda (the default engine) and, when requested or when
+/// Lightpanda has no build for this platform, Chrome for Testing.
+/// `--with-deps` installs Chrome's system libraries, so it implies Chrome.
+/// `chrome_only` (`--engine chrome`) keeps the original Chrome-only install.
+pub fn run_install(with_deps: bool, with_chrome: bool, chrome_only: bool) {
+    if chrome_only {
+        install_chrome(with_deps);
+        return;
+    }
+    let lightpanda_supported = crate::lightpanda_install::platform_asset().is_some();
+    if lightpanda_supported {
+        install_lightpanda_or_exit();
+    } else {
+        println!(
+            "{} Lightpanda has no build for this platform; installing Chrome instead.",
+            color::warning_indicator()
+        );
+    }
+    if lightpanda_supported && !with_chrome && !with_deps {
+        if crate::native::cdp::chrome::find_chrome().is_none() {
+            println!();
+            println!(
+                "  Visual screenshots of Lightpanda pages need a Chrome renderer. Either run:"
+            );
+            println!("    agent-browser install --with-chrome");
+            println!(
+                "  or point --screenshot-renderer at an `agent-browser renderer serve` deployment."
+            );
+        }
+        return;
+    }
+    install_chrome(with_deps);
+}
+
+fn install_lightpanda_or_exit() {
+    println!("{}", color::cyan("Installing Lightpanda..."));
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "{} Failed to create runtime: {}",
+                color::error_indicator(),
+                e
+            );
+            exit(1);
+        });
+    match rt.block_on(crate::lightpanda_install::install_lightpanda()) {
+        Ok((bin, true)) => {
+            println!(
+                "{} Lightpanda {} installed successfully",
+                color::success_indicator(),
+                crate::lightpanda_install::lightpanda_version()
+            );
+            println!("  Location: {}", bin.display());
+        }
+        Ok((bin, false)) => println!(
+            "{} Lightpanda {} is already installed ({})",
+            color::success_indicator(),
+            crate::lightpanda_install::lightpanda_version(),
+            bin.display()
+        ),
+        Err(e) => {
+            eprintln!("{} {}", color::error_indicator(), e);
+            exit(1);
+        }
+    }
+}
+
+fn install_chrome(with_deps: bool) {
     if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         eprintln!(
             "{} Chrome for Testing does not provide Linux ARM64 builds.",

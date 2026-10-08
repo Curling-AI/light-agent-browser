@@ -1,14 +1,15 @@
-# agent-browser
+# light-agent-browser
 
-Browser automation CLI for AI agents. Fast native Rust CLI.
+Lightweight browser automation CLI for AI agents, powered by [Lightpanda](https://github.com/lightpanda-io/browser). Fast native Rust CLI.
 
 <p>
-  <a href="https://vercel.com/labs#labs-products"><img alt="Vercel Labs Product" src="https://img.shields.io/badge/LABS-PRODUCT-0a0a0a.svg?style=for-the-badge&amp;logo=Vercel&amp;labelColor=000000" height="28"></a>
-  <a href="https://www.npmjs.com/package/agent-browser"><img alt="npm version: agent-browser" src="https://img.shields.io/npm/v/agent-browser.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
-  <a href="https://github.com/vercel-labs/agent-browser/blob/main/LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/github/license/vercel-labs/agent-browser.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
-  <a href="https://www.npmjs.com/package/agent-browser"><img alt="npm downloads per month: agent-browser" src="https://img.shields.io/npm/dm/agent-browser.svg?style=for-the-badge&amp;labelColor=000000&amp;label=npm%20downloads" height="28"></a>
-  <a href="https://skills.sh/vercel-labs/agent-browser"><img alt="skills.sh" src="https://skills.sh/b/vercel-labs/agent-browser?style=for-the-badge" height="28"></a>
+  <a href="https://www.npmjs.com/package/light-agent-browser"><img alt="npm version: light-agent-browser" src="https://img.shields.io/npm/v/light-agent-browser.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
+  <a href="https://github.com/Curling-AI/light-agent-browser/blob/main/LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/github/license/Curling-AI/light-agent-browser.svg?style=for-the-badge&amp;labelColor=000000" height="28"></a>
 </p>
+
+light-agent-browser is a fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-browser) that uses Lightpanda as the default engine, keeps Chrome as an automatic fallback, and renders screenshots of Lightpanda pages through a local or shared Chrome renderer. It installs the same `agent-browser` command and accepts the same commands, flags, environment variables, and config files, so existing scripts, skills, and MCP setups keep working. See [Lightpanda Engine and Screenshot Rendering](#lightpanda-engine-and-screenshot-rendering) and [FORK.md](FORK.md).
+
+Install either light-agent-browser or upstream agent-browser globally, not both: they provide the same `agent-browser` command.
 
 ## Installation
 
@@ -17,8 +18,8 @@ Browser automation CLI for AI agents. Fast native Rust CLI.
 Installs the native Rust binary:
 
 ```bash
-npm install -g agent-browser
-agent-browser install  # Download Chrome from Chrome for Testing (first time only)
+npm install -g light-agent-browser
+agent-browser install  # Download Lightpanda, the default engine (first time only)
 ```
 
 ### Project Installation (local dependency)
@@ -26,33 +27,28 @@ agent-browser install  # Download Chrome from Chrome for Testing (first time onl
 For projects that want to pin the version in `package.json`:
 
 ```bash
-npm install agent-browser
+npm install light-agent-browser
 agent-browser install
 ```
 
 Then use via `package.json` scripts or by invoking `agent-browser` directly.
 
-### Homebrew (macOS)
-
-```bash
-brew install agent-browser
-agent-browser install  # Download Chrome from Chrome for Testing (first time only)
-```
-
 ### Cargo (Rust)
 
 ```bash
-cargo install agent-browser
-agent-browser install  # Download Chrome from Chrome for Testing (first time only)
+cargo install --git https://github.com/Curling-AI/light-agent-browser agent-browser
+agent-browser install  # Download Lightpanda, the default engine (first time only)
 ```
+
+There is no Homebrew formula for light-agent-browser; `brew install agent-browser` installs upstream agent-browser.
 
 ### From Source
 
 Requires Node.js 24+, pnpm 11+, and Rust.
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
-cd agent-browser
+git clone https://github.com/Curling-AI/light-agent-browser
+cd light-agent-browser
 pnpm install
 pnpm build
 pnpm build:native   # Requires Rust (https://rustup.rs)
@@ -78,11 +74,12 @@ Upgrade to the latest version:
 agent-browser upgrade
 ```
 
-Detects your installation method (npm, Homebrew, or Cargo) and runs the appropriate update command automatically.
+Detects your installation method (npm, pnpm, yarn, bun, or Cargo) and upgrades the `light-agent-browser` package automatically.
 
 ### Requirements
 
-- **Chrome** - Run `agent-browser install` to download Chrome from [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing/) (Google's official automation channel). Existing Chrome, Brave, Playwright, and Puppeteer installations are detected automatically. No Playwright or Node.js required for the daemon.
+- **Lightpanda** - The default engine. Run `agent-browser install` to download it from the [Lightpanda releases](https://github.com/lightpanda-io/browser/releases) (macOS and Linux, x86_64 and ARM64). See [Lightpanda Engine and Screenshot Rendering](#lightpanda-engine-and-screenshot-rendering).
+- **Chrome (optional)** - Needed for visual screenshots of Lightpanda pages (unless you use a remote renderer), for Chrome-only options, and on Windows. Run `agent-browser install --with-chrome` to download Chrome from [Chrome for Testing](https://developer.chrome.com/blog/chrome-for-testing/) (Google's official automation channel). Existing Chrome, Brave, Playwright, and Puppeteer installations are detected automatically. No Playwright or Node.js required for the daemon.
 - **Node.js 24+ and pnpm 11+** - Only needed when building from source.
 - **Rust** - Only needed when building from source (see From Source above).
 
@@ -557,8 +554,11 @@ Runtime init-script identifiers are session-wide. `removeinitscript` removes the
 ### Setup
 
 ```bash
-agent-browser install                 # Download Chrome from Chrome for Testing (Google's official automation channel)
-agent-browser install --with-deps     # Also install system deps (Linux)
+agent-browser install                 # Download Lightpanda (the default engine)
+agent-browser install --with-chrome   # Also download Chrome from Chrome for Testing (Google's official automation channel)
+agent-browser install --with-deps     # Install Chrome and its system deps (Linux)
+agent-browser --engine chrome install # Install only Chrome (previous behavior)
+agent-browser renderer serve          # Run a shared screenshot renderer for Lightpanda agents
 agent-browser upgrade                 # Upgrade agent-browser to the latest version
 agent-browser doctor                  # Diagnose the install and auto-clean stale daemon files
 agent-browser doctor --fix            # Also run destructive repairs (reinstall Chrome, purge old state, ...)
@@ -1032,6 +1032,81 @@ agent-browser click @e2     # Click the "Home" link labeled [2]
 
 This is useful for multimodal AI models that can reason about visual layout, unlabeled icon buttons, canvas elements, or visual state that the text accessibility tree cannot capture.
 
+## Lightpanda Engine and Screenshot Rendering
+
+[Lightpanda](https://github.com/lightpanda-io/browser) is the default engine. It starts in milliseconds and uses a fraction of Chrome's memory, which suits agents that mostly navigate, read, and fill forms.
+
+### Engine selection
+
+When you pass `--engine` (or set `AGENT_BROWSER_ENGINE` or `engine` in config), that engine is always used. Without an explicit engine, agent-browser launches Lightpanda unless it cannot serve the launch, in which case it uses Chrome and prints a warning naming the reason:
+
+- the platform has no Lightpanda build (Windows)
+- Lightpanda is not installed (`agent-browser install` downloads it)
+- `--executable-path` points at a binary that is not Lightpanda
+- a Chrome-only option is set: `--headed`, `--profile`, `--extension`, `--state`, `--allow-file-access`, `--webgpu`, `--ca-cert`, or `--args`
+
+`--cdp`, `--auto-connect`, and `--provider` attach to an existing browser and are unaffected. Pass `--engine chrome` to keep the previous Chrome default and silence the warning.
+
+### Screenshots
+
+Lightpanda has no layout engine, so its own `Page.captureScreenshot` only draws the page text. To get a real screenshot, agent-browser serializes the current Lightpanda DOM (scripts and inline event handlers removed, form values and CSSOM-inserted styles kept, password values masked), collects the page cookies, viewport, scroll position, and color scheme, and renders that in Chrome at the original URL. Selector screenshots, `--full`, `--annotate`, and JPEG all work. `--json` output reports the renderer in `data.renderer`.
+
+Choose the renderer with `--screenshot-renderer` (or `AGENT_BROWSER_SCREENSHOT_RENDERER`, or `screenshotRenderer` in config):
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | Local Chrome when one is installed, otherwise `native` |
+| `chrome` | Local headless Chrome, launched on the first screenshot and kept until `close`. Fails when Chrome is not installed |
+| `native` | Lightpanda's text-only PNG render. No extra dependencies |
+| `http(s)://host:port` | Remote renderer service (see below) |
+
+```bash
+agent-browser open https://example.com          # Lightpanda
+agent-browser screenshot page.png               # Rendered by local Chrome when available
+agent-browser --screenshot-renderer native screenshot text.png
+```
+
+Limitations: the render reflects the DOM at capture time, so canvas pixels, video frames, closed shadow roots, and cross-origin iframe state are not reproduced. Iframes reload from the network. Element screenshots inside iframes are not supported. The renderer fetches subresources directly, not through `--proxy`. While `--allowed-domains` is active, Chrome rendering is disabled because it would load resources outside the filter: `auto` uses the native render and `chrome` or a renderer URL fails.
+
+### Remote renderer
+
+Run the renderer as a shared service so agent machines only need Lightpanda:
+
+```bash
+AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser renderer serve --host 0.0.0.0 --port 9300
+```
+
+Agents point at it:
+
+```bash
+export AGENT_BROWSER_SCREENSHOT_RENDERER=http://renderer.internal:9300
+export AGENT_BROWSER_RENDERER_TOKEN=change-me
+agent-browser screenshot
+```
+
+Each `screenshot` call forwards the caller's current `AGENT_BROWSER_RENDERER_TOKEN` to the session daemon (falling back to the daemon's own environment), so changing it needs no restart. The token is stripped from the command events shown in the dashboard. The service exposes `POST /v1/render` and `GET /healthz`, renders each request in an isolated Chrome browser context, and accepts `--concurrency` (default 4) and `--max-body-mb` (default 32). Requests contain the page HTML and its cookies, so keep the service on a private network, set a token, and use TLS (for example, through your ingress) when traffic leaves the host.
+
+### Configuring everything through environment variables
+
+Every setting has an environment variable, so an orchestrator can make Lightpanda plus a shared renderer the default for all agents without passing flags:
+
+```bash
+export AGENT_BROWSER_ENGINE=lightpanda                              # optional: lightpanda is already the default
+export AGENT_BROWSER_SCREENSHOT_RENDERER=http://agent-browser-renderer:9300
+export AGENT_BROWSER_RENDERER_TOKEN=change-me
+agent-browser open https://example.com
+agent-browser screenshot page.png                                   # rendered by the shared service
+```
+
+The same variables apply to `agent-browser mcp`, whose tools run the CLI with the server's environment. Precedence is flag, then environment variable, then `screenshotRenderer` in `agent-browser.json`. The renderer service itself reads `AGENT_BROWSER_RENDERER_HOST`, `AGENT_BROWSER_RENDERER_PORT`, `AGENT_BROWSER_RENDERER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_TOKEN`, and `AGENT_BROWSER_EXECUTABLE_PATH`.
+
+A container image and a Kubernetes example live in [`docker/renderer/`](docker/renderer/):
+
+```bash
+docker build -f docker/renderer/Dockerfile -t agent-browser-renderer .
+docker run --rm -p 9300:9300 -e AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser-renderer
+```
+
 ## Options
 
 | Option | Description |
@@ -1087,7 +1162,10 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--confirm-interactive` | Interactive confirmation prompts; auto-denies if stdin is not a TTY (or `AGENT_BROWSER_CONFIRM_INTERACTIVE` env) |
 | `--input-mode <mode>` | Session pointer movement: `instant` (default), `smooth`, or `human` |
 | `--idle-timeout <time>` | Shut down the daemon after inactivity (`10s`, `3m`, `1h`, or raw ms). Defaults to `1h`; use `0` to disable (or `AGENT_BROWSER_IDLE_TIMEOUT_MS` env) |
-| `--engine <name>` | Browser engine: `chrome` (default), `lightpanda`, `obscura` (experimental; rejects proxy bypass rules) (or `AGENT_BROWSER_ENGINE` env) |
+| `--engine <name>` | Browser engine: `lightpanda` (default; falls back to Chrome when unavailable, see [Engine selection](#engine-selection)), `chrome`, `obscura` (experimental; rejects proxy bypass rules) (or `AGENT_BROWSER_ENGINE` env) |
+| `--screenshot-renderer <mode>` | Renderer for Lightpanda screenshots: `auto` (default), `chrome`, `native`, or an `http(s)://` renderer URL (or `AGENT_BROWSER_SCREENSHOT_RENDERER` env) |
+| `AGENT_BROWSER_RENDERER_TOKEN` env | Bearer token sent to a remote renderer, and required by `renderer serve` when set |
+| `AGENT_BROWSER_LIGHTPANDA_VERSION` env | Lightpanda release downloaded by `install` (default `1.0.0`; `nightly` always re-downloads) |
 | `AGENT_BROWSER_OBSCURA_STEALTH` env | Run the Obscura engine (`--engine obscura`) in stealth mode: consistent fingerprint, tracker blocking |
 | `--no-auto-dialog` | Disable automatic dismissal of `alert`/`beforeunload` dialogs (or `AGENT_BROWSER_NO_AUTO_DIALOG` env) |
 | `--model <name>` | AI model for chat command (or `AI_GATEWAY_MODEL` env) |
@@ -1711,7 +1789,7 @@ agent-browser uses a client-daemon architecture:
 
 The daemon starts automatically on first command and persists between commands for fast subsequent operations. After **1 hour** with no commands or dashboard input it saves configured restore state, closes the browser, and exits, so an integration that dies without calling `close` cannot leak the daemon and its browser indefinitely; the next command starts a fresh daemon and configured state restore works as usual. A session without `--restore` or another restore key does not save browser state, so its transient state and open tabs are discarded at shutdown. Set `--idle-timeout` to a duration such as `30s`, `5m`, or `1h`, or set `AGENT_BROWSER_IDLE_TIMEOUT_MS` to a value in milliseconds. Use `0` to disable idle shutdown entirely. The default never closes a headed browser, including Safari and iOS WebDriver sessions, or a user-attached browser because those may be in direct human use. Provider-owned cloud browsers remain eligible for cleanup. An explicitly set timeout applies to every browser.
 
-**Browser Engine:** Uses Chrome (from Chrome for Testing) by default. The `--engine` flag selects between `chrome`, `lightpanda`, and `obscura`. Supported browsers: Chromium/Chrome (via CDP), Lightpanda and Obscura (via CDP), and Safari (via WebDriver for iOS).
+**Browser Engine:** Uses Lightpanda by default, falling back to Chrome (from Chrome for Testing) when Lightpanda cannot serve a launch. The `--engine` flag selects between `lightpanda`, `chrome`, and `obscura`. Screenshots of Lightpanda pages are rendered by a local or remote Chrome renderer. Supported browsers: Chromium/Chrome (via CDP), Lightpanda and Obscura (via CDP), and Safari (via WebDriver for iOS).
 
 ## Platforms
 
@@ -1740,7 +1818,7 @@ The `--help` output is comprehensive and most agents can figure it out from ther
 Add the skill to your AI coding assistant for richer context:
 
 ```bash
-npx skills add vercel-labs/agent-browser
+npx skills add Curling-AI/light-agent-browser
 ```
 
 This works with Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Goose, OpenCode, and Windsurf. The skill is fetched from the repository, so it stays up to date automatically. Do not copy `SKILL.md` from `node_modules` as it will become stale.
@@ -1750,7 +1828,7 @@ This works with Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot, Goose, O
 Install as a Claude Code skill:
 
 ```bash
-npx skills add vercel-labs/agent-browser
+npx skills add Curling-AI/light-agent-browser
 ```
 
 This adds a thin discovery stub at `.claude/skills/agent-browser/SKILL.md`. The stub is intentionally minimal — it points Claude Code at `agent-browser skills get core` to load the actual workflow content at runtime. This way the instructions always match the installed CLI version instead of going stale between releases.
@@ -2042,7 +2120,7 @@ When enabled, agent-browser connects to an AgentCore cloud browser session inste
 
 ## License
 
-Apache-2.0
+Apache-2.0. light-agent-browser is a fork of [agent-browser](https://github.com/vercel-labs/agent-browser) by Vercel Labs, used under the Apache License 2.0.
 
 ## Obscura (experimental)
 

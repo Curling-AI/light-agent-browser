@@ -104,10 +104,11 @@ Global launch, output, provider, and chat options can be set in the config file 
     <tr><td><code>actionPolicy</code></td><td><code>--action-policy</code></td><td>string</td></tr>
     <tr><td><code>confirmActions</code></td><td><code>--confirm-actions</code></td><td>string</td></tr>
     <tr><td><code>confirmInteractive</code></td><td><code>--confirm-interactive</code></td><td>boolean</td></tr>
-    <tr><td><code>engine</code></td><td><code>--engine</code></td><td>string (<code>chrome</code>, <code>lightpanda</code>, <code>obscura</code>)</td></tr>
+    <tr><td><code>engine</code></td><td><code>--engine</code></td><td>string (<code>lightpanda</code>, <code>chrome</code>, <code>obscura</code>); defaults to <code>lightpanda</code>, falling back to Chrome with a warning when Lightpanda cannot serve the launch</td></tr>
     <tr><td><code>screenshotDir</code></td><td><code>--screenshot-dir</code></td><td>string</td></tr>
     <tr><td><code>screenshotQuality</code></td><td><code>--screenshot-quality</code></td><td>number (0-100)</td></tr>
     <tr><td><code>screenshotFormat</code></td><td><code>--screenshot-format</code></td><td>string (<code>png</code>, <code>jpeg</code>)</td></tr>
+    <tr><td><code>screenshotRenderer</code></td><td><code>--screenshot-renderer</code></td><td>string (<code>auto</code>, <code>chrome</code>, <code>native</code>, or an <code>http(s)://</code> renderer URL); Lightpanda screenshots only</td></tr>
     <tr><td><code>idleTimeout</code></td><td><code>--idle-timeout</code></td><td>string (<code>10s</code>, <code>3m</code>, <code>1h</code>, or raw ms); defaults to <code>1h</code>, while <code>0</code> disables idle shutdown</td></tr>
     <tr><td><code>noAutoDialog</code></td><td><code>--no-auto-dialog</code></td><td>boolean</td></tr>
     <tr><td><code>model</code></td><td><code>--model</code></td><td>string</td></tr>
@@ -159,6 +160,27 @@ Without the CA certificate on hand, fall back to ignoring every certificate erro
   "ignoreHttpsErrors": true
 }
 ```
+
+### Lightpanda with a Remote Renderer
+
+```json
+{
+  "engine": "lightpanda",
+  "screenshotRenderer": "http://renderer.internal:9300"
+}
+```
+
+Set `AGENT_BROWSER_RENDERER_TOKEN` in the environment when the renderer requires a token. See [Remote renderer](/engines/lightpanda#remote-renderer).
+
+### Chrome Only
+
+```json
+{
+  "engine": "chrome"
+}
+```
+
+Restores the previous Chrome default and silences the fallback warning.
 
 ### iOS Testing
 
@@ -315,12 +337,18 @@ These environment variables configure additional daemon and runtime behavior:
     <tr><td><code>AGENT_BROWSER_ACTION_POLICY</code></td><td>Path to action policy JSON file.</td><td>(none)</td></tr>
     <tr><td><code>AGENT_BROWSER_CONFIRM_ACTIONS</code></td><td>Comma-separated action categories requiring confirmation.</td><td>(none)</td></tr>
     <tr><td><code>AGENT_BROWSER_CONFIRM_INTERACTIVE</code></td><td>Enable interactive confirmation prompts (auto-denies if stdin is not a TTY).</td><td>(disabled)</td></tr>
-    <tr><td><code>AGENT_BROWSER_ENGINE</code></td><td>Browser engine to use: <code>chrome</code> (default), <code>lightpanda</code>, <code>obscura</code> (experimental).</td><td><code>chrome</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_ENGINE</code></td><td>Browser engine to use: <code>lightpanda</code> (default), <code>chrome</code>, <code>obscura</code> (experimental). Without an explicit engine, agent-browser uses Chrome with a warning on Windows, when Lightpanda is not installed, when <code>--executable-path</code> is not a Lightpanda binary, or when a Chrome-only option is set. See <a href="/engines/lightpanda#engine-selection-and-chrome-fallback">Engine selection</a>.</td><td><code>lightpanda</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_LIGHTPANDA_VERSION</code></td><td>Lightpanda release downloaded by <code>agent-browser install</code>. <code>nightly</code> always re-downloads.</td><td><code>1.0.0</code></td></tr>
     <tr><td><code>AGENT_BROWSER_NO_AUTO_DIALOG</code></td><td>Disable automatic dismissal of <code>alert</code>/<code>beforeunload</code> dialogs.</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_PLUGINS</code></td><td>JSON plugin registry override.</td><td>(config discovery)</td></tr>
     <tr><td><code>AGENT_BROWSER_SCREENSHOT_DIR</code></td><td>Default screenshot output directory.</td><td>(temp directory)</td></tr>
     <tr><td><code>AGENT_BROWSER_SCREENSHOT_QUALITY</code></td><td>JPEG screenshot quality from 0 to 100.</td><td>(format default)</td></tr>
     <tr><td><code>AGENT_BROWSER_SCREENSHOT_FORMAT</code></td><td>Screenshot format: <code>png</code> or <code>jpeg</code>.</td><td><code>png</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_SCREENSHOT_RENDERER</code></td><td>Renderer for Lightpanda screenshots: <code>auto</code>, <code>chrome</code>, <code>native</code>, or an <code>http(s)://host:port</code> renderer URL. Ignored by the Chrome engine. While <code>--allowed-domains</code> is active, <code>auto</code> uses <code>native</code> and other modes return an error. See <a href="/engines/lightpanda#renderer-modes">Renderer modes</a>.</td><td><code>auto</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_TOKEN</code></td><td>Bearer token for a remote screenshot renderer. Clients send it; <code>agent-browser renderer serve</code> requires it when set. Each screenshot forwards the caller's current value, so changing it needs no restart.</td><td>(none)</td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_HOST</code></td><td>Bind address for <code>agent-browser renderer serve</code>.</td><td><code>127.0.0.1</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_PORT</code></td><td>Port for <code>agent-browser renderer serve</code>.</td><td><code>9300</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_CONCURRENCY</code></td><td>Parallel renders for <code>agent-browser renderer serve</code>.</td><td><code>4</code></td></tr>
     <tr><td><code>AGENT_BROWSER_SOCKET_DIR</code></td><td>Advanced override for daemon socket files.</td><td>runtime dir or <code>~/.agent-browser</code></td></tr>
     <tr><td><code>AGENT_BROWSER_SKILLS_DIR</code></td><td>Override the directory used by <code>agent-browser skills</code>.</td><td>bundled skills</td></tr>
     <tr><td><code>AGENT_BROWSER_COLOR</code></td><td>Enable colored CLI output when truthy.</td><td>(disabled)</td></tr>

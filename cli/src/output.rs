@@ -544,6 +544,9 @@ fn print_primary_response(resp: &Response, action: Option<&str>, opts: &OutputOp
         return;
     }
 
+    // Printed up front: many actions below return early after their output.
+    print_warning(resp);
+
     if let Some(data) = &resp.data {
         print_lifecycle_note(data);
 
@@ -570,7 +573,6 @@ fn print_primary_response(resp: &Response, action: Option<&str>, opts: &OutputOp
                 } else {
                     println!("{} No dialog is currently open", color::success_indicator());
                 }
-                print_warning(resp);
                 return;
             }
         }
@@ -1530,8 +1532,6 @@ fn print_primary_response(resp: &Response, action: Option<&str>, opts: &OutputOp
         // Default success
         println!("{} Done", color::success_indicator());
     }
-
-    print_warning(resp);
 }
 
 fn print_lifecycle_note(data: &serde_json::Value) {
@@ -2171,6 +2171,11 @@ saves to a temporary directory with a generated filename.
 Headless Chromium screenshots hide native scrollbars for consistent image output.
 Pass --hide-scrollbars false when launching to keep native scrollbars visible.
 
+Lightpanda has no layout engine. With the Lightpanda engine, the current DOM
+(scripts removed, form values kept) and the page cookies are rendered by a
+Chrome renderer chosen with --screenshot-renderer. JSON output reports which
+renderer was used in data.renderer.
+
 Options:
   --full, -f           Capture full page (not just viewport)
   --if-changed         Recommended: skip unchanged images to save tokens
@@ -2187,6 +2192,16 @@ Options:
                        (or AGENT_BROWSER_SCREENSHOT_QUALITY env)
   --screenshot-format <fmt>  Image format: png (default) or jpeg
                        (or AGENT_BROWSER_SCREENSHOT_FORMAT env)
+  --screenshot-renderer <mode>  Renderer for Lightpanda screenshots
+                       (or AGENT_BROWSER_SCREENSHOT_RENDERER env):
+                       auto (default): local Chrome if installed, else native
+                       chrome: local headless Chrome, launched on first use
+                       native: Lightpanda's own text-only PNG render
+                       http(s)://host:port: remote `agent-browser renderer serve`
+                       (bearer token from AGENT_BROWSER_RENDERER_TOKEN)
+                       With --allowed-domains, only native is used (auto) or
+                       allowed (chrome/URL fail), since rendering would load
+                       resources outside the filter.
 
 Global Options:
   --json               Output as JSON
@@ -2203,6 +2218,7 @@ Examples:
   agent-browser screenshot --annotate --json       # JSON output with annotations
   agent-browser screenshot --screenshot-dir ./shots # Save to custom directory
   agent-browser screenshot --screenshot-format jpeg --screenshot-quality 80
+  agent-browser --screenshot-renderer http://renderer:9300 screenshot
 "##
         }
         "pdf" => {
@@ -3158,16 +3174,57 @@ Examples:
             r##"
 agent-browser install - Install browser binaries
 
-Usage: agent-browser install [--with-deps]
+Usage: agent-browser install [--with-chrome] [--with-deps]
 
-Downloads and installs browser binaries required for automation.
+Downloads Lightpanda, the default engine, into ~/.agent-browser/browsers.
+On platforms without a Lightpanda build (Windows), installs Chrome instead.
 
 Options:
-  -d, --with-deps      Also install system dependencies (Linux only; fails if deps fail)
+  --with-chrome        Also install Chrome for Testing (visual screenshots of
+                       Lightpanda pages, Chrome-only options such as --headed)
+  -d, --with-deps      Install Chrome and its system dependencies (Linux only;
+                       fails if deps fail)
+  --engine chrome      Install only Chrome for Testing (previous behavior)
+
+Environment:
+  AGENT_BROWSER_LIGHTPANDA_VERSION  Lightpanda release to install (default: 1.0.0;
+                                    "nightly" always re-downloads)
 
 Examples:
   agent-browser install
+  agent-browser install --with-chrome
   agent-browser install --with-deps
+  agent-browser --engine chrome install
+"##
+        }
+
+        // === Renderer ===
+        "renderer" => {
+            r##"
+agent-browser renderer serve - Run a shared screenshot renderer
+
+Usage: agent-browser renderer serve [--host <host>] [--port <port>]
+                                    [--concurrency <n>] [--max-body-mb <mb>]
+
+Serves POST /v1/render for agents that use the Lightpanda engine with
+--screenshot-renderer http(s)://host:port, and GET /healthz for probes.
+Each render runs in an isolated Chrome browser context. The renderer
+receives the page HTML and the page cookies, so keep it on a private network
+and require a token.
+
+Options:
+  --host <host>          Bind address (default: 127.0.0.1; or AGENT_BROWSER_RENDERER_HOST)
+  --port <port>          Port (default: 9300; or AGENT_BROWSER_RENDERER_PORT)
+  --concurrency <n>      Parallel renders (default: 4; or AGENT_BROWSER_RENDERER_CONCURRENCY)
+  --max-body-mb <mb>     Maximum request size (default: 32)
+  --executable-path <p>  Chrome binary (or AGENT_BROWSER_EXECUTABLE_PATH)
+
+Environment:
+  AGENT_BROWSER_RENDERER_TOKEN  Require "Authorization: Bearer <token>"
+
+Examples:
+  AGENT_BROWSER_RENDERER_TOKEN=secret agent-browser renderer serve --host 0.0.0.0
+  docker build -f docker/renderer/Dockerfile -t agent-browser-renderer .
 "##
         }
 
@@ -3799,6 +3856,7 @@ pub fn print_help() {
     println!(
         r#"
 agent-browser - fast browser automation CLI for AI agents
+(light-agent-browser: Lightpanda by default, Chrome fallback)
 
 Usage: agent-browser <command> [args] [options]
 
@@ -3985,8 +4043,10 @@ Dashboard:
   dashboard stop             Stop the dashboard server
 
 Setup:
-  install                    Install browser binaries
-  install --with-deps        Also install system dependencies (Linux)
+  install                    Install Lightpanda (default engine)
+  install --with-chrome      Also install Chrome for Testing
+  install --with-deps        Install Chrome and system dependencies (Linux)
+  renderer serve             Run a shared screenshot renderer for Lightpanda agents
   upgrade                    Upgrade to the latest version
   doctor [--fix]             Diagnose install; auto-clean stale files
   dashboard start            Start the observability dashboard
@@ -4051,6 +4111,8 @@ Options:
   --screenshot-dir <path>    Default screenshot output directory (or AGENT_BROWSER_SCREENSHOT_DIR)
   --screenshot-quality <n>   JPEG quality 0-100; ignored for PNG (or AGENT_BROWSER_SCREENSHOT_QUALITY)
   --screenshot-format <fmt>  Screenshot format: png, jpeg (or AGENT_BROWSER_SCREENSHOT_FORMAT)
+  --screenshot-renderer <m>  Lightpanda screenshot renderer: auto (default), chrome, native,
+                             or http(s):// renderer URL (or AGENT_BROWSER_SCREENSHOT_RENDERER)
   --input-mode <mode>        Session pointer movement: instant (default), smooth, human
   --headed                   Show browser window (not headless) (or AGENT_BROWSER_HEADED env)
   --webgpu                   Enable WebGPU; uses SwiftShader software Vulkan on Linux, no GPU required (or AGENT_BROWSER_WEBGPU env)
@@ -4072,8 +4134,12 @@ Options:
   --confirm-interactive      Interactive confirmation prompts; auto-denies if stdin is not a TTY (or AGENT_BROWSER_CONFIRM_INTERACTIVE)
   --idle-timeout <time>      Shut down daemon after inactivity: 10s, 3m, 1h, or raw ms
                              (default: 1h; 0 disables; dashboard input resets the timer)
-  --engine <name>            Browser engine: chrome (default), lightpanda, obscura (experimental)
-                             (or AGENT_BROWSER_ENGINE); Obscura rejects --proxy-bypass,
+  --engine <name>            Browser engine: lightpanda (default), chrome, obscura (experimental)
+                             (or AGENT_BROWSER_ENGINE). Without an explicit engine, Chrome is
+                             used on Windows, when Lightpanda is not installed, with a Chrome
+                             --executable-path, or with Chrome-only options (--headed,
+                             --profile, --extension, --state, --allow-file-access, --webgpu,
+                             --ca-cert, --args); a warning names the reason. Obscura rejects --proxy-bypass,
                              proxyBypass config, AGENT_BROWSER_PROXY_BYPASS, NO_PROXY/no_proxy,
                              --webgpu, --ca-cert, --args, profiles, state, extensions,
                              headed mode, and file access. Discovery and CDP initialization
@@ -4181,7 +4247,8 @@ Environment:
   AGENT_BROWSER_CONFIRM_INTERACTIVE Enable interactive confirmation prompts
   AGENT_BROWSER_NO_AUTO_DIALOG   Disable automatic dismissal of alert/beforeunload dialogs
   AGENT_BROWSER_PLUGINS          JSON plugin registry override
-  AGENT_BROWSER_ENGINE           Browser engine: chrome (default), lightpanda, obscura (experimental)
+  AGENT_BROWSER_ENGINE           Browser engine: lightpanda (default, falls back to chrome), chrome, obscura (experimental)
+  AGENT_BROWSER_LIGHTPANDA_VERSION Lightpanda release downloaded by install (default: 1.0.0)
   OBSCURA_BIN                   Source E2E tests only: required executable path when explicitly
                                 running cargo test e2e_obscura -- --ignored --test-threads=1
                                 Tests clear AGENT_BROWSER_CDP, AGENT_BROWSER_AUTO_CONNECT,
@@ -4194,15 +4261,18 @@ Environment:
   AGENT_BROWSER_SCREENSHOT_DIR   Default screenshot output directory
   AGENT_BROWSER_SCREENSHOT_QUALITY JPEG quality 0-100
   AGENT_BROWSER_SCREENSHOT_FORMAT Screenshot format: png, jpeg
+  AGENT_BROWSER_SCREENSHOT_RENDERER Lightpanda screenshot renderer: auto, chrome, native, or URL
+  AGENT_BROWSER_RENDERER_TOKEN   Bearer token sent to a remote renderer (forwarded on each
+                                 screenshot) and required by `renderer serve` when set
   AI_GATEWAY_URL                 Vercel AI Gateway base URL (default: https://ai-gateway.vercel.sh)
   AI_GATEWAY_API_KEY             API key for the AI Gateway (enables chat command and dashboard AI chat)
   AI_GATEWAY_MODEL               Default AI model (default: anthropic/claude-sonnet-4.6, or --model flag)
 
 Install:
-  npm install -g agent-browser           # npm
-  brew install agent-browser             # Homebrew
-  cargo install agent-browser            # Cargo
-  agent-browser install                  # Download Chrome (first time)
+  npm install -g light-agent-browser     # npm (installs the agent-browser command)
+  cargo install --git https://github.com/Curling-AI/light-agent-browser agent-browser  # Cargo
+  agent-browser install                  # Download Lightpanda (first time)
+  agent-browser install --with-chrome    # Also download Chrome
 
 Examples:
   agent-browser open example.com

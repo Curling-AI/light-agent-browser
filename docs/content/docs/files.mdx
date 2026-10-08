@@ -55,8 +55,11 @@ Screenshot defaults can also be configured with:
     <tr><td><code>--screenshot-dir</code> / <code>AGENT_BROWSER_SCREENSHOT_DIR</code></td><td>Default screenshot output directory</td></tr>
     <tr><td><code>--screenshot-format</code> / <code>AGENT_BROWSER_SCREENSHOT_FORMAT</code></td><td><code>png</code> or <code>jpeg</code></td></tr>
     <tr><td><code>--screenshot-quality</code> / <code>AGENT_BROWSER_SCREENSHOT_QUALITY</code></td><td>JPEG quality from 0 to 100</td></tr>
+    <tr><td><code>--screenshot-renderer</code> / <code>AGENT_BROWSER_SCREENSHOT_RENDERER</code></td><td>Renderer for Lightpanda screenshots: <code>auto</code> (default), <code>chrome</code>, <code>native</code>, or an <code>http(s)://</code> renderer URL. Ignored by the Chrome engine</td></tr>
   </tbody>
 </table>
+
+With Lightpanda, the default engine, screenshots are rendered by Chrome from the current DOM and page cookies, because Lightpanda has no layout engine. `--json` output reports the renderer in `data.renderer`. While `--allowed-domains` is active, Chrome rendering is disabled: `auto` falls back to the native text render, and `chrome` or a renderer URL returns an error. The renderer fetches subresources directly, not through the session's `--proxy`. See [Lightpanda screenshots](/engines/lightpanda#screenshots) for renderer modes, limitations, and the shared renderer service.
 
 ## Local files
 

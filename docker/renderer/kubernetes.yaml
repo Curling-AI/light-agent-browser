@@ -1,0 +1,63 @@
+# Example deployment for agent-browser-renderer. Create the token first:
+#   kubectl create secret generic agent-browser-renderer --from-literal=token=$(openssl rand -hex 32)
+# Agents then use:
+#   AGENT_BROWSER_SCREENSHOT_RENDERER=http://agent-browser-renderer:9300
+#   AGENT_BROWSER_RENDERER_TOKEN=<same token>
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-browser-renderer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-browser-renderer
+  template:
+    metadata:
+      labels:
+        app: agent-browser-renderer
+    spec:
+      containers:
+        - name: renderer
+          image: agent-browser-renderer:latest
+          ports:
+            - containerPort: 9300
+          env:
+            - name: AGENT_BROWSER_RENDERER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agent-browser-renderer
+                  key: token
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9300
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9300
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-browser-renderer
+spec:
+  selector:
+    app: agent-browser-renderer
+  ports:
+    - port: 9300
+      targetPort: 9300

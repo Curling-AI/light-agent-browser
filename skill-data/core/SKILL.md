@@ -46,10 +46,13 @@ The default (unnamed) session is a single shared browser: it is shared with ever
 ## Quickstart
 
 ```bash
-# Install once
-npm i -g agent-browser && agent-browser install
+# Install once (downloads Lightpanda, the default engine)
+npm i -g light-agent-browser && agent-browser install
 
-# Linux hosts can install required browser libraries too
+# Also install Chrome for visual screenshots and Chrome-only options
+agent-browser install --with-chrome
+
+# Linux hosts can install Chrome plus its required libraries
 agent-browser install --with-deps
 
 # Take a screenshot of a page
@@ -324,6 +327,8 @@ Prefer `--if-changed` for repeated captures: skipping unchanged images is the mo
 
 Headless Chromium screenshots hide native scrollbars for consistent image output. Pass `--hide-scrollbars false` when launching to keep native scrollbars visible.
 
+With the default Lightpanda engine, screenshots are rendered in Chrome from the current DOM, cookies, and viewport (`--screenshot-renderer auto`, the default, uses a local Chrome when installed). Without Chrome, `auto` falls back to Lightpanda's text-only PNG; use `--screenshot-renderer http://host:9300` for a shared `agent-browser renderer serve` deployment. `--json` reports `data.renderer`. If a screenshot misses canvas, video, or iframe content, relaunch with `--engine chrome`. See [references/commands.md](references/commands.md#screenshots-and-pdf).
+
 `--annotate` is designed for multimodal models: each label `[N]` maps to ref `@eN`.
 
 ### Handle multiple pages via tabs
@@ -486,7 +491,8 @@ EOF
 --session <name>        # isolated browser session
 --json                  # JSON output (for machine parsing)
 --headed                # show the window (default is headless)
---engine <name>         # chrome (default), lightpanda, obscura (experimental)
+--engine <name>         # lightpanda (default; auto-falls back to chrome), chrome, obscura (experimental)
+--screenshot-renderer <m> # Lightpanda screenshots: auto (default), chrome, native, or renderer URL
 --webgpu                # enable WebGPU (software Vulkan on Linux, no GPU needed)
 --auto-connect          # connect to an already-running Chrome
 --cdp <port|url>        # connect to a CDP port or WebSocket URL; root query slash is optional
@@ -501,6 +507,8 @@ EOF
 --restore-save <policy> # auto, always, or never
 --namespace <name>      # isolate daemon sockets and restore-state directories
 ```
+
+Lightpanda is the default engine. Without an explicit `--engine`, agent-browser uses Chrome instead (with a warning) on Windows, when Lightpanda is not installed, or when a Chrome-only option is set (`--headed`, `--profile`, `--extension`, `--state`, `--allow-file-access`, `--webgpu`, `--ca-cert`, `--args`). Pass `--engine chrome` for sites that need full Chrome fidelity, recording, streaming, or WebMCP.
 
 Engine setup and limits: [Lightpanda](https://agent-browser.dev/engines/lightpanda), [Obscura (experimental)](https://agent-browser.dev/engines/obscura).
 

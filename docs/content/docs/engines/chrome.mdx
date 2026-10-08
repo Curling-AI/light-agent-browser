@@ -3,7 +3,7 @@ title: "Chrome"
 navTitle: "Chrome"
 ---
 
-Chrome (and Chromium) is the default browser engine. agent-browser discovers, launches, and manages the Chrome process automatically via the Chrome DevTools Protocol (CDP).
+Chrome (and Chromium) is the full-fidelity browser engine. agent-browser discovers, launches, and manages the Chrome process automatically via the Chrome DevTools Protocol (CDP). [Lightpanda](/engines/lightpanda) is the default engine; agent-browser uses Chrome when you select it explicitly or when Lightpanda cannot serve the launch.
 
 ## Binary Discovery
 
@@ -47,21 +47,44 @@ When no `--executable-path` is provided, agent-browser searches for Chrome in th
   </tbody>
 </table>
 
-If Chrome is not found, run `agent-browser install` to download Chrome from Chrome for Testing.
+If Chrome is not found, run `agent-browser install --with-chrome` to download Chrome from Chrome for Testing alongside Lightpanda, or `agent-browser --engine chrome install` to install only Chrome. On Linux, `agent-browser install --with-deps` also installs Chrome's system dependencies. On Windows, which has no Lightpanda build, `agent-browser install` installs Chrome.
 
 ## Usage
 
-Chrome is the default engine -- no `--engine` flag is needed:
-
-```bash
-agent-browser open example.com
-```
-
-To be explicit:
+Select Chrome with the `--engine` flag:
 
 ```bash
 agent-browser --engine chrome open example.com
 ```
+
+Or set it as the default via environment variable or config:
+
+```bash
+AGENT_BROWSER_ENGINE=chrome agent-browser open example.com
+```
+
+```json
+{
+  "engine": "chrome"
+}
+```
+
+An explicit engine restores the previous Chrome default and silences the fallback warning.
+
+### Automatic fallback to Chrome
+
+Without an explicit engine, agent-browser launches Chrome instead of Lightpanda and prints a warning naming the reason when:
+
+- the platform has no Lightpanda build (Windows)
+- Lightpanda is not installed
+- `--executable-path` points at a binary whose file name does not contain `lightpanda`
+- a Chrome-only option is set: `--headed`, `--profile`, `--extension`, `--state`, `--allow-file-access`, `--webgpu`, `--ca-cert`, or `--args`
+
+`--cdp`, `--auto-connect`, and `--provider` attach to an existing browser and are unaffected. See [Lightpanda](/engines/lightpanda#engine-selection-and-chrome-fallback) for details.
+
+### Screenshot renderer for Lightpanda
+
+Local Chrome also renders screenshots of Lightpanda pages. With the default `--screenshot-renderer auto`, an installed Chrome is used automatically. `--screenshot-renderer` is ignored when the session itself uses the Chrome engine. See [Lightpanda screenshots](/engines/lightpanda#screenshots).
 
 ## Custom Binary
 
@@ -70,6 +93,8 @@ Point to any Chromium-based browser with `--executable-path`:
 ```bash
 agent-browser --executable-path /path/to/chromium open example.com
 ```
+
+Without an explicit engine, an executable whose file name does not contain `lightpanda` selects Chrome.
 
 Or via environment variable:
 

@@ -939,6 +939,7 @@ fn tools() -> Vec<Value> {
                 "format": { "type": "string", "enum": ["png", "jpeg"], "description": "Screenshot format." },
                 "quality": { "type": "integer", "minimum": 0, "maximum": 100, "description": "JPEG quality." },
                 "screenshotDir": { "type": "string", "description": "Default output directory when path is omitted." },
+                "renderer": { "type": "string", "description": "Renderer for Lightpanda screenshots: auto (default), chrome, native, or an http(s):// URL of an `agent-browser renderer serve` deployment. Ignored by the Chrome engine." },
                 "ifChanged": { "type": "boolean", "default": false, "description": "Recommended for repeated captures to save tokens: return image content only when pixels changed." },
                 "threshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Maximum changed-pixel ratio to treat as unchanged. Implies ifChanged." }
             }),
@@ -1617,7 +1618,7 @@ fn parity_tools() -> Vec<Value> {
             TOOL_DIFF_SCREENSHOT,
             "Diff screenshot",
             "Diff screenshot against a baseline image.",
-            json!({ "baseline": { "type": "string" }, "output": { "type": "string" }, "threshold": number_schema(), "selector": { "type": "string" }, "fullPage": { "type": "boolean" } }),
+            json!({ "baseline": { "type": "string" }, "output": { "type": "string" }, "threshold": number_schema(), "selector": { "type": "string" }, "fullPage": { "type": "boolean" }, "renderer": { "type": "string", "description": "Renderer for Lightpanda screenshots: auto, chrome, native, or a renderer URL." } }),
             &[],
         ),
         tool(
@@ -1875,8 +1876,8 @@ fn parity_tools() -> Vec<Value> {
         tool(
             TOOL_INSTALL,
             "Install",
-            "Install browser binaries.",
-            json!({ "withDeps": { "type": "boolean" } }),
+            "Install browser binaries: Lightpanda (the default engine), plus Chrome with withChrome or withDeps.",
+            json!({ "withDeps": { "type": "boolean" }, "withChrome": { "type": "boolean", "description": "Also install Chrome for Testing (visual screenshots, Chrome-only options)." } }),
             &[],
         ),
         tool(
@@ -2049,7 +2050,7 @@ fn tool(name: &str, title: &str, description: &str, properties: Value, required:
         json!({
             "type": "array",
             "items": { "type": "string" },
-            "description": "Advanced: extra CLI arguments, including --engine chrome|lightpanda|obscura and --executable-path, preserving full CLI parity. Obscura is experimental and rejects --proxy-bypass (including resolved config/environment settings). Explicit Obscura launches send this invocation's resolved bypass setting even to an existing daemon."
+            "description": "Advanced: extra CLI arguments, including --engine chrome|lightpanda|obscura (default lightpanda, falling back to chrome when unavailable), --screenshot-renderer, and --executable-path, preserving full CLI parity. Obscura is experimental and rejects --proxy-bypass (including resolved config/environment settings). Explicit Obscura launches send this invocation's resolved bypass setting even to an existing daemon."
         }),
     );
     props.insert(
@@ -2815,6 +2816,10 @@ fn screenshot_command_args(arguments: &Value) -> Result<Vec<String>, ProtocolErr
         args.push("--screenshot-dir".to_string());
         args.push(dir);
     }
+    if let Some(renderer) = optional_string(arguments, "renderer")? {
+        args.push("--screenshot-renderer".to_string());
+        args.push(renderer);
+    }
 
     args.push("screenshot".to_string());
     if let Some(selector) = optional_string(arguments, "selector")? {
@@ -3341,7 +3346,16 @@ fn call_diff_snapshot(arguments: &Value) -> Result<Value, ProtocolError> {
 }
 
 fn call_diff_screenshot(arguments: &Value) -> Result<Value, ProtocolError> {
-    let mut args = vec!["diff".to_string(), "screenshot".to_string()];
+    call_cli_tool(arguments, diff_screenshot_args(arguments)?, None)
+}
+
+fn diff_screenshot_args(arguments: &Value) -> Result<Vec<String>, ProtocolError> {
+    let mut args = Vec::new();
+    if let Some(renderer) = optional_string(arguments, "renderer")? {
+        args.push("--screenshot-renderer".to_string());
+        args.push(renderer);
+    }
+    args.extend(["diff".to_string(), "screenshot".to_string()]);
     for (key, flag) in [
         ("baseline", "--baseline"),
         ("output", "--output"),
@@ -3359,7 +3373,7 @@ fn call_diff_screenshot(arguments: &Value) -> Result<Value, ProtocolError> {
     if optional_bool(arguments, "fullPage")?.unwrap_or(false) {
         args.push("--full".to_string());
     }
-    call_cli_tool(arguments, args, None)
+    Ok(args)
 }
 
 fn call_diff_url(arguments: &Value) -> Result<Value, ProtocolError> {
@@ -3628,6 +3642,11 @@ fn call_install(arguments: &Value) -> Result<Value, ProtocolError> {
     if optional_bool(arguments, "withDeps")?.unwrap_or(false) {
         args.push("--with-deps".to_string());
     }
+    if optional_bool(arguments, "withChrome")?.unwrap_or(false) {
+        args.push("--with-chrome".to_string());
+    }
+    // `renderer serve` is intentionally not an MCP tool: it is a long-running
+    // network service meant to be deployed separately, not a session command.
     call_cli_tool(arguments, args, None)
 }
 
@@ -4232,6 +4251,33 @@ mod tests {
                 command["interactive"].as_bool().unwrap_or(false),
                 arguments["interactive"].as_bool().unwrap_or(true)
             );
+        }
+    }
+
+    #[test]
+    fn screenshot_renderer_matches_cli_parser() {
+        let arguments = json!({ "renderer": "http://renderer:9300", "fullPage": true });
+        let args = screenshot_command_args(&arguments).unwrap();
+        let flags = crate::flags::parse_flags(&args);
+        let command =
+            crate::commands::parse_command(&crate::flags::clean_args(&args), &flags).unwrap();
+        assert_eq!(command["action"], "screenshot");
+        assert_eq!(command["renderer"], "http://renderer:9300");
+
+        let args =
+            diff_screenshot_args(&json!({ "renderer": "native", "baseline": "b.png" })).unwrap();
+        let flags = crate::flags::parse_flags(&args);
+        let command =
+            crate::commands::parse_command(&crate::flags::clean_args(&args), &flags).unwrap();
+        assert_eq!(command["action"], "diff_screenshot");
+        assert_eq!(command["renderer"], "native");
+
+        let args = screenshot_command_args(&json!({})).unwrap();
+        let flags = crate::flags::parse_flags(&args);
+        let command =
+            crate::commands::parse_command(&crate::flags::clean_args(&args), &flags).unwrap();
+        if std::env::var("AGENT_BROWSER_SCREENSHOT_RENDERER").is_err() {
+            assert!(command.get("renderer").is_none());
         }
     }
 

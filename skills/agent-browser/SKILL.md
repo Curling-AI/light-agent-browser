@@ -9,7 +9,7 @@ hidden: true
 
 Fast browser automation CLI for AI agents. Chrome/Chromium via CDP with accessibility-tree snapshots and compact `@eN` element refs.
 
-Install: `npm i -g agent-browser && agent-browser install`
+Install: `npm i -g light-agent-browser && agent-browser install` (light-agent-browser installs the `agent-browser` command, with Lightpanda as the default engine)
 
 ## Start here
 

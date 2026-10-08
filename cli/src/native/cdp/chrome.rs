@@ -1061,8 +1061,14 @@ pub fn find_chrome() -> Option<PathBuf> {
 
     // If the cache directory exists but no Chrome was found, warn -- this
     // likely means the cache is corrupted or the directory layout is unexpected.
+    // The directory also holds Lightpanda builds, so only `chrome-*` entries count.
     let cache_dir = crate::install::get_browsers_dir();
-    if cache_dir.exists() {
+    let has_chrome_entries = std::fs::read_dir(&cache_dir).is_ok_and(|entries| {
+        entries
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().starts_with("chrome-"))
+    });
+    if has_chrome_entries {
         let _ = writeln!(
             std::io::stderr(),
             "Warning: Chrome cache directory exists ({}) but no Chrome binary found inside. \

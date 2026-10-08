@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Postinstall script for agent-browser
+ * Postinstall script for light-agent-browser (installs the `agent-browser` command)
  * 
  * Downloads the platform-specific native binary if not present.
  * On global installs, patches npm's bin entry to use the native binary directly:
@@ -9,10 +9,10 @@
  * - Mac/Linux: Replaces symlink to point to native binary
  */
 
-import { existsSync, mkdirSync, chmodSync, createWriteStream, unlinkSync, writeFileSync, symlinkSync, lstatSync } from 'fs';
+import { existsSync, mkdirSync, chmodSync, createWriteStream, unlinkSync, writeFileSync, symlinkSync, lstatSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { platform, arch } from 'os';
+import { platform, arch, homedir } from 'os';
 import { get } from 'https';
 import { execSync } from 'child_process';
 
@@ -48,7 +48,7 @@ const packageJson = JSON.parse(
 const version = packageJson.version;
 
 // GitHub release URL
-const GITHUB_REPO = 'vercel-labs/agent-browser';
+const GITHUB_REPO = 'Curling-AI/light-agent-browser';
 const DOWNLOAD_URL = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${binaryName}`;
 
 async function downloadFile(url, dest) {
@@ -194,9 +194,43 @@ function findSystemChrome() {
   return null;
 }
 
+function findLightpanda() {
+  const os = platform();
+  if (os !== 'darwin' && os !== 'linux') return null;
+  try {
+    const result = execSync('which lightpanda 2>/dev/null', { encoding: 'utf8' }).trim();
+    if (result) return result;
+  } catch {}
+  const home = homedir();
+  const candidates = [join(home, '.lightpanda', 'lightpanda'), join(home, '.local', 'bin', 'lightpanda')];
+  const browsersDir = join(home, '.agent-browser', 'browsers');
+  try {
+    for (const entry of readdirSync(browsersDir)) {
+      if (entry.startsWith('lightpanda-')) candidates.push(join(browsersDir, entry, 'lightpanda'));
+    }
+  } catch {}
+  return candidates.find(p => existsSync(p)) || null;
+}
+
 function showInstallReminder() {
+  const os = platform();
+  const lightpandaSupported = os === 'darwin' || os === 'linux';
+  const lightpanda = findLightpanda();
   const systemChrome = findSystemChrome();
-  if (systemChrome) {
+
+  if (lightpandaSupported && lightpanda) {
+    console.log('');
+    console.log(`  ✓ Lightpanda found: ${lightpanda}`);
+    if (systemChrome) {
+      console.log(`  ✓ Chrome found for screenshots and Chrome-only options: ${systemChrome}`);
+    } else {
+      console.log('    For visual screenshots, also run: agent-browser install --with-chrome');
+    }
+    console.log('');
+    return;
+  }
+
+  if (!lightpandaSupported && systemChrome) {
     console.log('');
     console.log(`  ✓ System Chrome found: ${systemChrome}`);
     console.log('    agent-browser will use it automatically.');
@@ -205,13 +239,20 @@ function showInstallReminder() {
   }
 
   console.log('');
-  console.log('  ⚠ No Chrome installation detected.');
+  if (lightpandaSupported) {
+    console.log('  ⚠ Lightpanda (the default engine) is not installed.');
+    if (systemChrome) {
+      console.log(`    Until then, agent-browser uses Chrome: ${systemChrome}`);
+    }
+  } else {
+    console.log('  ⚠ No Chrome installation detected.');
+  }
   console.log('  If you plan to use a local browser, run:');
   console.log('');
   console.log('    agent-browser install');
-  if (platform() === 'linux') {
+  if (os === 'linux') {
     console.log('');
-    console.log('  On Linux, include system dependencies with:');
+    console.log('  On Linux, include Chrome and its system dependencies with:');
     console.log('');
     console.log('    agent-browser install --with-deps');
   }
@@ -296,7 +337,7 @@ async function fixWindowsShims() {
   // Detect architecture so ARM64 Windows is handled correctly
   // (falls back to x64 binary — see platform detection above)
   const cpuArch = effectiveArch;
-  const relativeBinaryPath = `node_modules\\agent-browser\\bin\\agent-browser-win32-${cpuArch}.exe`;
+  const relativeBinaryPath = `node_modules\\light-agent-browser\\bin\\agent-browser-win32-${cpuArch}.exe`;
   const absoluteBinaryPath = join(npmBinDir, relativeBinaryPath);
 
   // Only rewrite shims if the native binary actually exists

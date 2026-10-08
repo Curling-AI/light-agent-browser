@@ -17,6 +17,8 @@ pub mod diff;
 #[allow(dead_code)]
 pub mod element;
 #[allow(dead_code)]
+pub mod engine;
+#[allow(dead_code)]
 pub mod inspect_server;
 #[allow(dead_code)]
 pub mod interaction;
@@ -30,6 +32,8 @@ pub mod providers;
 pub mod react;
 #[allow(dead_code)]
 pub mod recording;
+#[allow(dead_code)]
+pub mod render;
 #[allow(dead_code)]
 pub mod screenshot;
 #[allow(dead_code)]
