@@ -3,6 +3,21 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.38.3
+
+<p className="text-[#888] text-sm">October 8, 2026</p>
+
+### New Features
+
+- **PDFs through the renderer** - With Lightpanda, `agent-browser pdf` now prints the page through the same Chrome renderer as screenshots (local or `agent-browser renderer serve`), so PDFs keep the page's layout, styles, and form values instead of Lightpanda's text-only output. `--screenshot-renderer` applies to PDFs too, `native` keeps the text-only PDF, and the MCP `agent_browser_pdf` tool accepts `renderer` (#3)
+
+### Improvements
+
+- **Renderer version check** - A renderer service that predates PDF support now fails with a clear "update the renderer service" error instead of saving an image as a PDF (#3)
+- **Trusted publishing** - Releases publish to npm through npm trusted publishing instead of a long-lived token (#2)
+
+---
+
 ## v0.38.2 (light-agent-browser)
 
 <p className="text-[#888] text-sm">October 8, 2026</p>

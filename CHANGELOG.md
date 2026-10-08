@@ -1,8 +1,24 @@
 # light-agent-browser
 
-## 0.38.2 (light-agent-browser)
+## 0.38.3
 
 <!-- release:start -->
+### New Features
+
+- **PDFs through the renderer** - With Lightpanda, `agent-browser pdf` now prints the page through the same Chrome renderer as screenshots (local or `agent-browser renderer serve`), so PDFs keep the page's layout, styles, and form values instead of Lightpanda's text-only output. `--screenshot-renderer` applies to PDFs too, `native` keeps the text-only PDF, and the MCP `agent_browser_pdf` tool accepts `renderer` (#3)
+
+### Improvements
+
+- **Renderer version check** - A renderer service that predates PDF support now fails with a clear "update the renderer service" error instead of saving an image as a PDF (#3)
+- **Trusted publishing** - Releases publish to npm through npm trusted publishing instead of a long-lived token (#2)
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.38.2 (light-agent-browser)
+
 ### New Features
 
 - **First light-agent-browser release** - Published to npm as `light-agent-browser`, a fork of agent-browser 0.38.2. It installs the same `agent-browser` command and keeps upstream commands, flags, environment variables, and config files
@@ -19,7 +35,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.38.2
 
