@@ -13,7 +13,7 @@ This fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-br
 New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 - `cli/src/native/engine.rs`: default engine resolution and fallback rules
-- `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service
+- `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service; `guard.rs` holds the untrusted-input policy the service enforces (scripts off, public http(s) subresources only)
 - `cli/src/lightpanda_install.rs`: Lightpanda download for `install`
 - `docker/renderer/`: renderer container image and Kubernetes example
 - `FORK.md`: this file
@@ -22,6 +22,7 @@ Upstream files carry small, self-contained hooks:
 
 - `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`
 - `cli/src/native/mod.rs`: module registration
+- `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior)
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
 - `cli/src/install.rs`: `run_install` installs Lightpanda first; Chrome install moved to `install_chrome`

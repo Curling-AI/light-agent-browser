@@ -247,6 +247,8 @@ AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser renderer serve --host 0.0.0
     <tr><td><code>--port &lt;port&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_PORT</code></td><td><code>9300</code></td></tr>
     <tr><td><code>--concurrency &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_CONCURRENCY</code></td><td><code>4</code> parallel renders</td></tr>
     <tr><td><code>--max-body-mb &lt;mb&gt;</code></td><td></td><td><code>32</code> MB maximum request size</td></tr>
+    <tr><td><code>--recycle-after &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_RECYCLE_AFTER</code></td><td>Relaunch Chrome every <code>200</code> renders</td></tr>
+    <tr><td><code>--allow-unauthenticated</code></td><td></td><td>Off: a non-loopback host requires a token</td></tr>
     <tr><td><code>--executable-path &lt;path&gt;</code></td><td><code>AGENT_BROWSER_EXECUTABLE_PATH</code></td><td>Auto-discovered Chrome</td></tr>
   </tbody>
 </table>
@@ -263,7 +265,7 @@ The service exposes two endpoints:
   </tbody>
 </table>
 
-Each render runs in an isolated Chrome browser context, so requests never share cookies or storage.
+Each render runs in an isolated Chrome browser context, so requests never share cookies or storage. The context is disposed on every path, including the 85 second render deadline.
 
 Point agents at the service:
 
@@ -281,9 +283,18 @@ Every renderer setting has an environment variable, so an orchestrator can confi
 
 Render requests contain the page HTML and its cookies. Treat the renderer like any service that handles session credentials:
 
-- Keep it on a private network.
-- Set `AGENT_BROWSER_RENDERER_TOKEN` on the server. `renderer serve` prints a warning when it binds to a non-loopback host without a token.
-- Use TLS (for example, through your ingress) when traffic leaves the host.
+The service treats every request as untrusted:
+
+- Page scripts are disabled in the renderer, whether or not the caller stripped them.
+- Subresources load only over http(s) from public addresses. Requests to loopback, private, link-local (including cloud metadata endpoints), CGNAT, and other reserved ranges fail, and so do other schemes such as `file:`. The check covers resources requested after the load event.
+- Viewports are capped at 4096 pixels per side and a device scale factor of 2.
+- Chrome is relaunched every `--recycle-after` renders.
+
+Deploy it accordingly:
+
+- Set `AGENT_BROWSER_RENDERER_TOKEN` on the server. `renderer serve` refuses to bind a non-loopback host without a token unless you pass `--allow-unauthenticated`.
+- Keep it on a private network, and add a network policy that denies egress to private ranges. The address check resolves each host before Chrome does, so DNS rebinding can only be ruled out at the network layer.
+- Use TLS (for example, through your ingress or a private CA) when traffic leaves the host.
 
 ### Container image
 

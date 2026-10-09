@@ -1086,7 +1086,7 @@ export AGENT_BROWSER_RENDERER_TOKEN=change-me
 agent-browser screenshot
 ```
 
-Each `screenshot` call forwards the caller's current `AGENT_BROWSER_RENDERER_TOKEN` to the session daemon (falling back to the daemon's own environment), so changing it needs no restart. The token is stripped from the command events shown in the dashboard. The service exposes `POST /v1/render` and `GET /healthz`, renders each request in an isolated Chrome browser context, and accepts `--concurrency` (default 4) and `--max-body-mb` (default 32). Requests contain the page HTML and its cookies, so keep the service on a private network, set a token, and use TLS (for example, through your ingress) when traffic leaves the host.
+Each `screenshot` call forwards the caller's current `AGENT_BROWSER_RENDERER_TOKEN` to the session daemon (falling back to the daemon's own environment), so changing it needs no restart. The token is stripped from the command events shown in the dashboard. The service exposes `POST /v1/render` and `GET /healthz`, renders each request in an isolated Chrome browser context, and accepts `--concurrency` (default 4), `--max-body-mb` (default 32), and `--recycle-after` (default 200 renders before Chrome is relaunched). It treats every request as untrusted: page scripts are disabled, subresources load only over http(s) from public addresses (loopback, private, link-local, and CGNAT ranges are refused, which covers cloud metadata endpoints), each render has an 85 second deadline, and viewports are capped at 4096 pixels per side with a device scale factor of 2. Requests contain the page HTML and its cookies, so the service refuses to listen on a non-loopback address without `AGENT_BROWSER_RENDERER_TOKEN` (pass `--allow-unauthenticated` to override). Keep it on a private network and use TLS (for example, through your ingress) when traffic leaves the host. The address check resolves each host before Chrome fetches it, so a network policy around the service is still the hard boundary against DNS rebinding.
 
 ### Configuring everything through environment variables
 
@@ -1100,7 +1100,7 @@ agent-browser open https://example.com
 agent-browser screenshot page.png                                   # rendered by the shared service
 ```
 
-The same variables apply to `agent-browser mcp`, whose tools run the CLI with the server's environment. Precedence is flag, then environment variable, then `screenshotRenderer` in `agent-browser.json`. The renderer service itself reads `AGENT_BROWSER_RENDERER_HOST`, `AGENT_BROWSER_RENDERER_PORT`, `AGENT_BROWSER_RENDERER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_TOKEN`, and `AGENT_BROWSER_EXECUTABLE_PATH`.
+The same variables apply to `agent-browser mcp`, whose tools run the CLI with the server's environment. Precedence is flag, then environment variable, then `screenshotRenderer` in `agent-browser.json`. The renderer service itself reads `AGENT_BROWSER_RENDERER_HOST`, `AGENT_BROWSER_RENDERER_PORT`, `AGENT_BROWSER_RENDERER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_RECYCLE_AFTER`, `AGENT_BROWSER_RENDERER_TOKEN`, and `AGENT_BROWSER_EXECUTABLE_PATH`.
 
 A container image and a Kubernetes example live in [`docker/renderer/`](docker/renderer/):
 

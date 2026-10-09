@@ -14,6 +14,7 @@
 //! - `http(s)://host[:port]`: remote renderer service
 
 pub mod chrome;
+pub mod guard;
 pub mod remote;
 pub mod server;
 

@@ -538,7 +538,19 @@ impl CdpClient {
     /// [`unsubscribe_session`](Self::unsubscribe_session) when done; a dropped
     /// receiver also ends the route on the next event for that session.
     pub fn subscribe_session(&self, session_id: &str) -> mpsc::Receiver<CdpEvent> {
-        let (tx, rx) = mpsc::channel(PRIVATE_SESSION_BUFFER);
+        self.subscribe_session_with_buffer(session_id, PRIVATE_SESSION_BUFFER)
+    }
+
+    /// Like [`subscribe_session`](Self::subscribe_session), with room for
+    /// `capacity` events before newer ones are dropped. For consumers that
+    /// must see every event, such as one answering `Fetch.requestPaused`:
+    /// a dropped pause leaves its request hanging.
+    pub fn subscribe_session_with_buffer(
+        &self,
+        session_id: &str,
+        capacity: usize,
+    ) -> mpsc::Receiver<CdpEvent> {
+        let (tx, rx) = mpsc::channel(capacity.max(1));
         self.private_sessions
             .lock()
             .unwrap_or_else(|e| e.into_inner())
