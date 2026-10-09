@@ -264,7 +264,17 @@ async fn render(
         // The write lock waits for renders in flight, so none is cut short.
         let mut renderer = state.renderer.write().await;
         renderer.shutdown().await;
-        *renderer = launch(&state.options).await?;
+        // A failed relaunch must not discard this render's result. The dead
+        // renderer is replaced by the recovery path on the next request.
+        match launch(&state.options).await {
+            Ok(fresh) => *renderer = fresh,
+            Err(e) => eprintln!(
+                "{} Failed to relaunch Chrome after {} renders: {}",
+                crate::color::warning_indicator(),
+                count,
+                e
+            ),
+        }
     }
     if first.is_ok() {
         return first;
@@ -454,6 +464,44 @@ mod tests {
         };
         let err = run(options).await.unwrap_err();
         assert!(err.contains("without a token"), "{err}");
+    }
+
+    /// Needs Chrome: `cargo test recycle_failure -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn recycle_failure_keeps_the_render_and_recovers() {
+        let renderer = ChromeRenderer::launch_with(None, 1, RenderPolicy::SERVICE)
+            .await
+            .expect("Chrome is required for this test");
+        let mut options = ServeOptions {
+            recycle_after: 1,
+            ..ServeOptions::default()
+        };
+        // Every relaunch after the first render fails.
+        options.executable_path = Some("/nonexistent/chrome".to_string());
+        let state = ServerState {
+            renderer: RwLock::new(renderer),
+            options,
+            renders: AtomicU64::new(0),
+        };
+        let request: RenderRequest = serde_json::from_value(serde_json::json!({
+            "url": "about:blank",
+            "html": "<p>recycle</p>",
+            "viewport": { "width": 200, "height": 100 }
+        }))
+        .unwrap();
+
+        let first = render(&state, &request).await;
+        assert!(first.is_ok(), "render result dropped: {:?}", first.err());
+
+        // The next request lands on the dead renderer and relaunches it once
+        // the binary is reachable again. No recycle is due on that request.
+        let mut state = state;
+        state.options.executable_path = None;
+        state.options.recycle_after = u64::MAX;
+        let second = render(&state, &request).await;
+        assert!(second.is_ok(), "did not recover: {:?}", second.err());
+        state.renderer.write().await.shutdown().await;
     }
 
     #[test]
