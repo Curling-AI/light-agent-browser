@@ -31,6 +31,15 @@ impl EngineChoice {
     }
 }
 
+/// Why `url` cannot be opened by `engine`, when only Chrome can open it.
+pub fn chrome_required_for_url(engine: &str, url: &str) -> Option<&'static str> {
+    let is_file = url
+        .get(..5)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("file:"));
+    (engine.eq_ignore_ascii_case(DEFAULT_ENGINE) && is_file)
+        .then_some("Lightpanda cannot open file:// URLs")
+}
+
 /// Resolves the engine for a local launch, probing for an installed Lightpanda.
 pub fn resolve_launch_engine(explicit: Option<&str>, options: &LaunchOptions) -> EngineChoice {
     // The upstream e2e suite exercises Chrome-specific behavior without
@@ -134,6 +143,16 @@ fn is_lightpanda_binary(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_lightpanda_needs_chrome_for_file_urls() {
+        use super::chrome_required_for_url;
+        assert!(chrome_required_for_url("lightpanda", "file:///tmp/a.html").is_some());
+        assert!(chrome_required_for_url("Lightpanda", "FILE:///tmp/a.html").is_some());
+        assert!(chrome_required_for_url("lightpanda", "https://example.com").is_none());
+        assert!(chrome_required_for_url("chrome", "file:///tmp/a.html").is_none());
+        assert!(chrome_required_for_url("lightpanda", "").is_none());
+    }
+
     use super::*;
 
     fn resolve(explicit: Option<&str>, options: &LaunchOptions, installed: bool) -> EngineChoice {

@@ -640,6 +640,12 @@ pub struct DaemonState {
     network_auto_attach_installed: bool,
     /// Browser engine name (e.g. "chrome", "lightpanda") for observability.
     pub engine: String,
+    /// The engine came from the default rather than `--engine` or
+    /// `AGENT_BROWSER_ENGINE`, so the daemon may switch it when a page needs
+    /// Chrome.
+    pub engine_is_default: bool,
+    /// Set right before an implicit relaunch that has to use Chrome.
+    force_chrome: bool,
     /// One-shot warning attached to the response of the command that
     /// launched the browser (e.g. the default engine fell back to Chrome).
     pub pending_launch_warning: Option<String>,
@@ -767,6 +773,8 @@ impl DaemonState {
             network_auto_attach_installed: false,
             engine: env::var("AGENT_BROWSER_ENGINE").unwrap_or_else(|_| "chrome".to_string()),
             pending_launch_warning: None,
+            engine_is_default: false,
+            force_chrome: false,
             screenshot_renderer: super::render::ScreenshotRenderer::default(),
             // README documents 25s, intentionally below the CLI's 30s IPC
             // read timeout so the daemon reports a proper timeout error
@@ -4086,7 +4094,11 @@ async fn auto_launch_inner(
     if let Some(ref server) = state.stream_server {
         options.viewport_size = Some(server.viewport().await);
     }
-    let engine = env::var("AGENT_BROWSER_ENGINE").ok();
+    let engine = if std::mem::take(&mut state.force_chrome) {
+        Some("chrome".to_string())
+    } else {
+        env::var("AGENT_BROWSER_ENGINE").ok()
+    };
     let cdp = env::var("AGENT_BROWSER_CDP").ok();
     let auto_connect = env::var("AGENT_BROWSER_AUTO_CONNECT").is_ok();
     let provider = env::var("AGENT_BROWSER_PROVIDER").ok();
@@ -4281,6 +4293,7 @@ async fn auto_launch_inner(
     apply_launch_mutator_plugins(state, &mut options, plugins).await?;
     let engine_choice = super::engine::resolve_launch_engine(engine.as_deref(), &options);
     state.pending_launch_warning = engine_choice.warning();
+    state.engine_is_default = engine.is_none();
     let engine = Some(engine_choice.engine);
     state.engine = engine.clone().unwrap_or_default();
     write_engine_file(&state.session_id, &state.engine);
@@ -5063,6 +5076,7 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
     let engine = if local_launch {
         let choice = super::engine::resolve_launch_engine(engine.as_deref(), &launch_options);
         launch_warning = choice.warning();
+        state.engine_is_default = engine.is_none();
         Some(choice.engine)
     } else {
         engine
@@ -5454,6 +5468,22 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
             let title = wb.get_title().await.unwrap_or_default();
             return Ok(json!({ "url": new_url, "title": title }));
         }
+    }
+
+    if let Some(reason) = super::engine::chrome_required_for_url(&state.engine, url) {
+        if !state.engine_is_default {
+            return Err(format!(
+                "{}. Use --engine chrome for this session, or serve the file over HTTP (for example `python3 -m http.server`).",
+                reason
+            ));
+        }
+        state.force_chrome = true;
+        auto_launch(state, plugins_from_command_or_env(cmd)).await?;
+        state.engine_is_default = true;
+        state.pending_launch_warning = Some(format!(
+            "Relaunched this session with the Chrome engine: {}.",
+            reason
+        ));
     }
 
     let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
@@ -6178,6 +6208,9 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
     }
     if rendered_by != super::render::RenderedBy::Engine {
         response["renderer"] = json!(rendered_by.as_str());
+        if let Some(reason) = rendered_by.reason() {
+            response["rendererReason"] = json!(reason);
+        }
     }
 
     Ok(response)
@@ -8205,6 +8238,9 @@ async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
     let mut response = json!({ "path": save_path });
     if rendered_by != super::render::RenderedBy::Engine {
         response["renderer"] = json!(rendered_by.as_str());
+        if let Some(reason) = rendered_by.reason() {
+            response["rendererReason"] = json!(reason);
+        }
     }
     Ok(response)
 }

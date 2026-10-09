@@ -15,6 +15,7 @@
 
 pub mod chrome;
 pub mod guard;
+pub mod live;
 pub mod remote;
 pub mod server;
 
@@ -143,6 +144,14 @@ pub struct RenderRequest {
     /// `Page.printToPDF` parameters when `output` is `pdf`.
     #[serde(default)]
     pub pdf: Option<Value>,
+    /// Open `url` and let the page run instead of painting `html`. Never on
+    /// the wire: only the daemon's own short-lived Chrome may do this, so a
+    /// shared renderer can never be asked to run a caller's scripts.
+    #[serde(skip)]
+    pub live: bool,
+    /// Element to clip to in a live capture, as a CSS path.
+    #[serde(skip)]
+    pub live_selector: Option<String>,
 }
 
 fn default_format() -> String {
@@ -197,6 +206,7 @@ pub enum RenderedBy {
     LightpandaText,
     LocalChrome,
     Remote,
+    LiveChrome(live::LiveReason),
 }
 
 impl RenderedBy {
@@ -206,6 +216,15 @@ impl RenderedBy {
             Self::LightpandaText => "lightpanda-text",
             Self::LocalChrome => "chrome",
             Self::Remote => "remote",
+            Self::LiveChrome(_) => "chrome-live",
+        }
+    }
+
+    /// Why the capture left the configured renderer, if it did.
+    pub fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::LiveChrome(reason) => Some(reason.as_str()),
+            _ => None,
         }
     }
 }
@@ -265,6 +284,21 @@ pub async fn capture_screenshot(
         }
         return Ok((native().await?, RenderedBy::LightpandaText));
     };
+
+    // Annotations map refs onto the serialized DOM, which a reload would lose.
+    if !options.annotate {
+        if let Some(reason) = needs_live(ctx).await {
+            let request = live_request(ctx, options).await?;
+            let response = live::capture(&request).await?;
+            return Ok((
+                ScreenshotResult {
+                    base64: response.data,
+                    annotations: Vec::new(),
+                },
+                RenderedBy::LiveChrome(reason),
+            ));
+        }
+    }
 
     let request = build_render_request(ctx, options).await?;
     let response = dispatch(renderer, ctx, rendered_by, remote_url, &request).await?;
@@ -356,10 +390,23 @@ pub async fn capture_pdf(
         return Ok((print(pdf_params).await?, RenderedBy::LightpandaText));
     };
 
-    let mut request = build_render_request(ctx, &ScreenshotOptions::default()).await?;
+    let live = needs_live(ctx).await;
+    let mut request = match live {
+        Some(_) => live_request(ctx, &ScreenshotOptions::default()).await?,
+        None => build_render_request(ctx, &ScreenshotOptions::default()).await?,
+    };
     request.output = "pdf".to_string();
     request.pdf = Some(pdf_params);
-    let response = dispatch(renderer, ctx, rendered_by, remote_url, &request).await?;
+    let (response, rendered_by) = match live {
+        Some(reason) => (
+            live::capture(&request).await?,
+            RenderedBy::LiveChrome(reason),
+        ),
+        None => (
+            dispatch(renderer, ctx, rendered_by, remote_url, &request).await?,
+            rendered_by,
+        ),
+    };
     if !is_pdf_base64(&response.data) {
         return Err(
             "The screenshot renderer did not return a PDF. Update the renderer service to a version that supports PDF output."
@@ -367,6 +414,34 @@ pub async fn capture_pdf(
         );
     }
     Ok((response.data, rendered_by))
+}
+
+/// Whether the capture has to go live, which needs a local Chrome. Without
+/// one, the configured renderer still produces the best capture it can.
+async fn needs_live(ctx: &CaptureContext<'_>) -> Option<live::LiveReason> {
+    let reason = live::live_reason(ctx).await?;
+    super::cdp::chrome::find_chrome().map(|_| reason)
+}
+
+/// The page's URL, cookies, viewport and scroll, for Chrome to open itself.
+async fn live_request(
+    ctx: &CaptureContext<'_>,
+    options: &ScreenshotOptions,
+) -> Result<RenderRequest, String> {
+    let live_selector = match options.selector.as_deref() {
+        Some(selector) => Some(live::css_path(ctx, selector).await?),
+        None => None,
+    };
+    let plain = ScreenshotOptions {
+        selector: None,
+        annotate: false,
+        ..options.clone()
+    };
+    let mut request = build_render_request(ctx, &plain).await?;
+    request.html = String::new();
+    request.live = true;
+    request.live_selector = live_selector;
+    Ok(request)
 }
 
 /// Renderers that predate PDF support ignore `output` and return an image.
@@ -563,6 +638,8 @@ async fn build_render_request(
         timeout_ms: None,
         output: default_output(),
         pdf: None,
+        live: false,
+        live_selector: None,
     })
 }
 
