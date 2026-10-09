@@ -3,11 +3,15 @@
 ## 0.39.0 (light-agent-browser)
 
 <!-- release:start -->
+### Breaking Changes
+
+- **`renderer serve` requires a token off loopback** - The service refuses to listen on a non-loopback address unless `AGENT_BROWSER_RENDERER_TOKEN` or `AGENT_BROWSER_RENDERER_HMAC_KEY` is set, because render requests carry page cookies. Pass `--allow-unauthenticated` to keep the old behavior (#5)
+
 ### New Features
 
-- **Hardened renderer service** - `agent-browser renderer serve` now treats requests as untrusted: page scripts stay off, every subresource is checked and only http(s) to public addresses loads (cloud metadata, loopback and private networks are blocked), renders have an 85s deadline, viewports are capped, Chrome is recycled every 200 renders (`--recycle-after`), and a network listener without a token is refused unless `--allow-unauthenticated` is passed (#5)
+- **Hardened renderer service** - `agent-browser renderer serve` now treats requests as untrusted: page scripts stay off, every subresource is checked and only http(s) to public addresses loads (cloud metadata, loopback and private networks are blocked), renders have an 85s deadline, viewports are capped, Chrome is recycled every 200 renders (`--recycle-after`) (#5)
 - **Live captures for charts** - Pages with a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts) are captured by a short-lived local Chrome that runs the page (`renderer: chrome-live`, `rendererReason`). With a remote renderer, local pages (`file://`, localhost, private addresses) are captured live too. When a live capture is needed but no Chrome is installed, the command warns (`rendererWarning`) (#6)
-- **`file://` with Lightpanda** - Navigating to a `file://` URL relaunches a default-engine session with Chrome; an explicit `--engine lightpanda` fails with a hint instead (#6)
+- **`file://` with Lightpanda** - Navigating to a `file://` URL relaunches a default-engine session with Chrome; an explicit `--engine lightpanda` fails with a hint instead. An empty `AGENT_BROWSER_ENGINE` counts as the default, so an orchestrator can clear an engine an image pinned (#6)
 - **Per-caller renderer tokens, limits and metrics** - `renderer serve` accepts per-caller HMAC tokens (`AGENT_BROWSER_RENDERER_HMAC_KEY`, `agent-browser renderer token <caller>`), limits each caller's concurrent and per-minute renders with `429` and `Retry-After`, exposes `GET /metrics`, and logs one JSON line per request (#7)
 
 ### Improvements
