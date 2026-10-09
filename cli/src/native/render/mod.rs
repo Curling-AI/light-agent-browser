@@ -259,7 +259,7 @@ pub async fn capture_screenshot(
     ctx: &CaptureContext<'_>,
     options: &ScreenshotOptions,
     mode: &RendererMode,
-) -> Result<(ScreenshotResult, RenderedBy), String> {
+) -> Result<(ScreenshotResult, RenderedBy, Option<live::LiveReason>), String> {
     let native = || async {
         screenshot::take_screenshot(
             ctx.client,
@@ -272,7 +272,7 @@ pub async fn capture_screenshot(
     };
 
     if !ctx.engine.eq_ignore_ascii_case("lightpanda") {
-        return Ok((native().await?, RenderedBy::Engine));
+        return Ok((native().await?, RenderedBy::Engine, None));
     }
 
     let Some((rendered_by, remote_url)) = select_renderer(ctx, mode)? else {
@@ -282,21 +282,27 @@ pub async fn capture_screenshot(
                     .to_string(),
             );
         }
-        return Ok((native().await?, RenderedBy::LightpandaText));
+        return Ok((native().await?, RenderedBy::LightpandaText, None));
     };
 
     // Annotations map refs onto the serialized DOM, which a reload would lose.
+    let mut missed_live = None;
     if !options.annotate {
-        if let Some(reason) = needs_live(ctx).await {
-            let request = live_request(ctx, options).await?;
-            let response = live::capture(&request).await?;
-            return Ok((
-                ScreenshotResult {
-                    base64: response.data,
-                    annotations: Vec::new(),
-                },
-                RenderedBy::LiveChrome(reason),
-            ));
+        match live_decision(ctx, rendered_by).await {
+            LiveDecision::Capture(reason) => {
+                let request = live_request(ctx, options).await?;
+                let response = live::capture(&request).await?;
+                return Ok((
+                    ScreenshotResult {
+                        base64: response.data,
+                        annotations: Vec::new(),
+                    },
+                    RenderedBy::LiveChrome(reason),
+                    None,
+                ));
+            }
+            LiveDecision::Missed(reason) => missed_live = Some(reason),
+            LiveDecision::NotNeeded => {}
         }
     }
 
@@ -314,6 +320,7 @@ pub async fn capture_screenshot(
             annotations,
         },
         rendered_by,
+        missed_live,
     ))
 }
 
@@ -370,7 +377,7 @@ pub async fn capture_pdf(
     ctx: &CaptureContext<'_>,
     pdf_params: Value,
     mode: &RendererMode,
-) -> Result<(String, RenderedBy), String> {
+) -> Result<(String, RenderedBy, Option<live::LiveReason>), String> {
     let print = |params: Value| async move {
         let result = ctx
             .client
@@ -384,13 +391,17 @@ pub async fn capture_pdf(
     };
 
     if !ctx.engine.eq_ignore_ascii_case("lightpanda") {
-        return Ok((print(pdf_params).await?, RenderedBy::Engine));
+        return Ok((print(pdf_params).await?, RenderedBy::Engine, None));
     }
     let Some((rendered_by, remote_url)) = select_renderer(ctx, mode)? else {
-        return Ok((print(pdf_params).await?, RenderedBy::LightpandaText));
+        return Ok((print(pdf_params).await?, RenderedBy::LightpandaText, None));
     };
 
-    let live = needs_live(ctx).await;
+    let (live, missed_live) = match live_decision(ctx, rendered_by).await {
+        LiveDecision::Capture(reason) => (Some(reason), None),
+        LiveDecision::Missed(reason) => (None, Some(reason)),
+        LiveDecision::NotNeeded => (None, None),
+    };
     let mut request = match live {
         Some(_) => live_request(ctx, &ScreenshotOptions::default()).await?,
         None => build_render_request(ctx, &ScreenshotOptions::default()).await?,
@@ -413,14 +424,29 @@ pub async fn capture_pdf(
                 .to_string(),
         );
     }
-    Ok((response.data, rendered_by))
+    Ok((response.data, rendered_by, missed_live))
 }
 
-/// Whether the capture has to go live, which needs a local Chrome. Without
-/// one, the configured renderer still produces the best capture it can.
-async fn needs_live(ctx: &CaptureContext<'_>) -> Option<live::LiveReason> {
-    let reason = live::live_reason(ctx).await?;
-    super::cdp::chrome::find_chrome().map(|_| reason)
+enum LiveDecision {
+    NotNeeded,
+    Capture(live::LiveReason),
+    /// A live capture was needed but no local Chrome is installed. The
+    /// configured renderer still produces the best capture it can, and the
+    /// command warns that it may be incomplete.
+    Missed(live::LiveReason),
+}
+
+/// Whether the capture has to go live, which needs a local Chrome.
+async fn live_decision(ctx: &CaptureContext<'_>, rendered_by: RenderedBy) -> LiveDecision {
+    let remote = rendered_by == RenderedBy::Remote;
+    let Some(reason) = live::probe(ctx).await.reason(remote) else {
+        return LiveDecision::NotNeeded;
+    };
+    if super::cdp::chrome::find_chrome().is_some() {
+        LiveDecision::Capture(reason)
+    } else {
+        LiveDecision::Missed(reason)
+    }
 }
 
 /// The page's URL, cookies, viewport and scroll, for Chrome to open itself.

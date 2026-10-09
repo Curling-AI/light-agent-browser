@@ -646,8 +646,9 @@ pub struct DaemonState {
     pub engine_is_default: bool,
     /// Set right before an implicit relaunch that has to use Chrome.
     force_chrome: bool,
-    /// One-shot warning attached to the response of the command that
-    /// launched the browser (e.g. the default engine fell back to Chrome).
+    /// One-shot warning attached to the response of the current command
+    /// (e.g. the default engine fell back to Chrome, or a capture could not
+    /// go live).
     pub pending_launch_warning: Option<String>,
     /// Screenshot renderer for engines without a layout engine (Lightpanda).
     /// Holds a lazily launched Chrome when rendering locally.
@@ -5481,7 +5482,7 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
         auto_launch(state, plugins_from_command_or_env(cmd)).await?;
         state.engine_is_default = true;
         state.pending_launch_warning = Some(format!(
-            "Relaunched this session with the Chrome engine: {}.",
+            "Relaunched this session with the Chrome engine: {}. The previous Lightpanda tabs and cookies were closed.",
             reason
         ));
     }
@@ -6124,6 +6125,7 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
 
     let renderer_mode = super::render::RendererMode::from_command(cmd)?;
     let mut rendered_by = super::render::RenderedBy::Engine;
+    let mut missed_live = None;
     let (session_id, result) = if let Some(wb) = state
         .webdriver_backend
         .as_ref()
@@ -6170,7 +6172,7 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
             .await?;
         }
 
-        let (result, by) = super::render::capture_screenshot(
+        let (result, by, missed) = super::render::capture_screenshot(
             &state.screenshot_renderer,
             &super::render::CaptureContext {
                 client: &mgr.client,
@@ -6186,6 +6188,7 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
         )
         .await?;
         rendered_by = by;
+        missed_live = missed;
 
         (session_id, result)
     };
@@ -6212,8 +6215,26 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
             response["rendererReason"] = json!(reason);
         }
     }
+    report_missed_live(&mut response, state, missed_live);
 
     Ok(response)
+}
+
+/// Flags a capture that needed a live Chrome it could not get: the JSON
+/// carries `rendererReason` and `rendererWarning`, and the CLI prints the
+/// warning.
+fn report_missed_live(
+    response: &mut Value,
+    state: &mut DaemonState,
+    missed: Option<super::render::live::LiveReason>,
+) {
+    let Some(reason) = missed else {
+        return;
+    };
+    let warning = super::render::live::missed_warning(reason);
+    response["rendererReason"] = json!(reason.as_str());
+    response["rendererWarning"] = json!(warning);
+    state.pending_launch_warning.get_or_insert(warning);
 }
 
 fn record_click_animation(
@@ -8184,7 +8205,7 @@ async fn handle_recording_restart(cmd: &Value, state: &mut DaemonState) -> Resul
     }))
 }
 
-async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
+async fn handle_pdf(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
     let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
     let session_id = mgr.active_session_id()?.to_string();
 
@@ -8194,7 +8215,7 @@ async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
         "preferCSSPageSize": cmd.get("preferCSSPageSize").and_then(|v| v.as_bool()).unwrap_or(false),
     });
 
-    let (data, rendered_by) = super::render::capture_pdf(
+    let (data, rendered_by, missed_live) = super::render::capture_pdf(
         &state.screenshot_renderer,
         &super::render::CaptureContext {
             client: &mgr.client,
@@ -8242,6 +8263,7 @@ async fn handle_pdf(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
             response["rendererReason"] = json!(reason);
         }
     }
+    report_missed_live(&mut response, state, missed_live);
     Ok(response)
 }
 
@@ -11256,7 +11278,7 @@ async fn handle_diff_screenshot(cmd: &Value, state: &DaemonState) -> Result<Valu
         output_dir: None,
     };
 
-    let (result, _) = super::render::capture_screenshot(
+    let (result, _, _) = super::render::capture_screenshot(
         &state.screenshot_renderer,
         &super::render::CaptureContext {
             client: &mgr.client,

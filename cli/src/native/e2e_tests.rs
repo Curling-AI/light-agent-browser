@@ -1244,6 +1244,15 @@ const RED_CANVAS_PAGE: &str = "<!doctype html><html><body style=\"margin:0;backg
 <script>const c = document.getElementById('k').getContext('2d'); c.fillStyle = '#ff0000'; c.fillRect(0, 0, 300, 300);</script>\
 </body></html>";
 
+/// A local page without charts: a capture must paint the session's DOM, which
+/// keeps the typed value, instead of reloading the page.
+const LOCAL_FORM_PAGE: &str = "<!doctype html><html><body><input id=\"name\"></body></html>";
+
+/// Hidden canvases (text measurement, tracking) are no reason to reload.
+const HIDDEN_CANVAS_PAGE: &str = "<!doctype html><html><body><p>text</p>\
+<canvas width=\"1\" height=\"1\" style=\"display:none\"></canvas>\
+<div hidden><canvas width=\"300\" height=\"300\"></canvas></div></body></html>";
+
 fn pixel_at(base64_png: &str, x: u32, y: u32) -> [u8; 3] {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -1315,8 +1324,15 @@ async fn e2e_lightpanda_canvas_pages_go_live() {
         while let Ok((mut stream, _)) = listener.accept().await {
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
-                let _ = stream.read(&mut buf).await;
-                let body = RED_CANVAS_PAGE;
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let body = if request.starts_with("GET /form ") {
+                    LOCAL_FORM_PAGE
+                } else if request.starts_with("GET /hidden ") {
+                    HIDDEN_CANVAS_PAGE
+                } else {
+                    RED_CANVAS_PAGE
+                };
                 let head = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
@@ -1352,9 +1368,42 @@ async fn e2e_lightpanda_canvas_pages_go_live() {
     assert_success(&resp);
     let data = get_data(&resp);
     assert_eq!(data["renderer"], "chrome-live");
-    assert_eq!(data["rendererReason"], "local-server");
+    // A local renderer reaches local pages; only the chart forces a reload.
+    assert_eq!(data["rendererReason"], "canvas");
     let img = image::open(&path).unwrap().to_rgb8();
     assert_eq!(img.get_pixel(50, 50).0, [255, 0, 0]);
+
+    // A local page without charts keeps the serialized DOM and its typed value.
+    for (id, page) in [("form", "/form"), ("hidden", "/hidden")] {
+        assert_success(
+            &execute_command(
+                &json!({ "id": format!("{id}-nav"), "action": "navigate", "url": format!("http://127.0.0.1:{port}{page}") }),
+                &mut state,
+            )
+            .await,
+        );
+        if id == "form" {
+            assert_success(
+                &execute_command(
+                    &json!({ "id": "fill", "action": "fill", "selector": "#name", "value": "typed" }),
+                    &mut state,
+                )
+                .await,
+            );
+        }
+        let path = dir.path().join(format!("{id}.png"));
+        let resp = execute_command(
+            &json!({ "id": id, "action": "screenshot", "path": path.to_str().unwrap(), "renderer": "chrome" }),
+            &mut state,
+        )
+        .await;
+        assert_success(&resp);
+        assert_eq!(get_data(&resp)["renderer"], "chrome", "{id}: {resp}");
+        assert!(
+            get_data(&resp).get("rendererReason").is_none(),
+            "{id}: {resp}"
+        );
+    }
 
     // Lightpanda cannot open file:// at all; an explicit engine is never
     // switched behind the caller's back, so the error says what to do.

@@ -17,23 +17,42 @@ use super::guard::RenderPolicy;
 use super::{CaptureContext, RenderRequest, RenderResponse};
 use crate::native::element::resolve_element_object_id;
 
-/// Returns why the page needs a live capture, or `null`.
+/// Reports two independent signals: `local` (the page lives where only this
+/// machine can reach it) and `chart` (it draws something a serialized DOM
+/// cannot reproduce). Either may be `null`.
 const LIVE_PROBE_JS: &str = r#"(() => {
   const loc = window.location;
-  if (loc.protocol === 'file:') return 'local-file';
-  const host = (loc.hostname || '').replace(/^\[|\]$/g, '');
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' ||
-      /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host)) {
-    return 'local-server';
+  let local = null;
+  if (loc.protocol === 'file:') {
+    local = 'local-file';
+  } else {
+    const host = (loc.hostname || '').replace(/^\[|\]$/g, '');
+    if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' ||
+        /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^169\.254\./.test(host)) {
+      local = 'local-server';
+    }
   }
-  // Any canvas, whatever its size: when a chart library fails under
+  // Hidden canvases (text measurement, captchas, tracking) draw nothing the
+  // user sees, so they are no reason to reload the page.
+  const shown = (el) => {
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      if (node.hidden) return false;
+      try {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+      } catch (e) {}
+    }
+    return true;
+  };
+  let chart = null;
+  // Any visible canvas, whatever its size: when a chart library fails under
   // Lightpanda its canvas never grows past the placeholder it started as.
-  if (document.querySelector('canvas')) return 'canvas';
-  if (document.querySelector('.apexcharts-canvas, .apexcharts-svg')) return 'layout-chart';
-  if ((window.google && window.google.visualization) ||
-      document.querySelector('script[src*="gstatic.com/charts"]')) return 'layout-chart';
-  return null;
+  if (Array.from(document.querySelectorAll('canvas')).some(shown)) chart = 'canvas';
+  else if (document.querySelector('.apexcharts-canvas, .apexcharts-svg')) chart = 'layout-chart';
+  else if ((window.google && window.google.visualization) ||
+      document.querySelector('script[src*="gstatic.com/charts"]')) chart = 'layout-chart';
+  return { local, chart };
 })()"#;
 
 /// Builds a CSS path that finds the same element after Chrome reloads the page.
@@ -84,11 +103,60 @@ impl LiveReason {
     }
 }
 
-/// Probes the Lightpanda page. A failed probe means "no", so a capture never
-/// breaks because the probe did.
-pub async fn live_reason(ctx: &CaptureContext<'_>) -> Option<LiveReason> {
-    let value = super::evaluate_value(ctx, LIVE_PROBE_JS).await.ok()?;
-    LiveReason::parse(value.as_str()?)
+/// What the probe found on the Lightpanda page.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LiveProbe {
+    /// `local-file` or `local-server`.
+    pub local: Option<LiveReason>,
+    /// `canvas` or `layout-chart`.
+    pub chart: Option<LiveReason>,
+}
+
+impl LiveProbe {
+    /// Why the capture must reload the page in a local Chrome, if it must.
+    ///
+    /// Charts always need it: no serialized DOM carries canvas pixels. Local
+    /// pages only need it for a remote renderer, which cannot reach them. A
+    /// local renderer reaches them already and paints the session's own DOM,
+    /// keeping typed form values and client-side state a reload would lose.
+    pub fn reason(self, remote_renderer: bool) -> Option<LiveReason> {
+        if remote_renderer {
+            self.local.or(self.chart)
+        } else {
+            self.chart
+        }
+    }
+}
+
+/// Probes the Lightpanda page. A failed probe finds nothing, so a capture
+/// never breaks because the probe did.
+pub async fn probe(ctx: &CaptureContext<'_>) -> LiveProbe {
+    let Ok(value) = super::evaluate_value(ctx, LIVE_PROBE_JS).await else {
+        return LiveProbe::default();
+    };
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .and_then(LiveReason::parse)
+    };
+    LiveProbe {
+        local: field("local"),
+        chart: field("chart"),
+    }
+}
+
+/// Explains a live capture that was needed but could not run, for the
+/// command's warning.
+pub fn missed_warning(reason: LiveReason) -> String {
+    match reason {
+        LiveReason::LocalFile | LiveReason::LocalServer => {
+            "The remote renderer cannot reach this local page, so the capture may be incomplete. Install Chrome (`agent-browser install --with-chrome`) for live captures, or use --screenshot-renderer chrome.".to_string()
+        }
+        LiveReason::Canvas | LiveReason::LayoutChart => {
+            "This page draws charts that only a live capture shows, and no local Chrome is installed, so they may be blank. Install Chrome (`agent-browser install --with-chrome`) or use --engine chrome.".to_string()
+        }
+    }
 }
 
 /// CSS path of the element `selector` points at in the Lightpanda page.
@@ -146,5 +214,40 @@ mod tests {
             assert_eq!(LiveReason::parse(reason.as_str()), Some(reason));
         }
         assert_eq!(LiveReason::parse("something-else"), None);
+    }
+
+    #[test]
+    fn local_pages_only_go_live_for_a_remote_renderer() {
+        let local = LiveProbe {
+            local: Some(LiveReason::LocalServer),
+            chart: None,
+        };
+        assert_eq!(local.reason(true), Some(LiveReason::LocalServer));
+        assert_eq!(local.reason(false), None);
+
+        let file = LiveProbe {
+            local: Some(LiveReason::LocalFile),
+            chart: None,
+        };
+        assert_eq!(file.reason(false), None);
+    }
+
+    #[test]
+    fn charts_go_live_for_every_renderer() {
+        let chart = LiveProbe {
+            local: None,
+            chart: Some(LiveReason::Canvas),
+        };
+        assert_eq!(chart.reason(false), Some(LiveReason::Canvas));
+        assert_eq!(chart.reason(true), Some(LiveReason::Canvas));
+
+        // A local chart page reports the local reason to a remote renderer.
+        let both = LiveProbe {
+            local: Some(LiveReason::LocalServer),
+            chart: Some(LiveReason::Canvas),
+        };
+        assert_eq!(both.reason(true), Some(LiveReason::LocalServer));
+        assert_eq!(both.reason(false), Some(LiveReason::Canvas));
+        assert_eq!(LiveProbe::default().reason(true), None);
     }
 }
