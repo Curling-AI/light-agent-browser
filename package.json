@@ -1,7 +1,7 @@
 {
-  "name": "light-agent-browser",
-  "version": "0.38.3",
-  "description": "Lightweight browser automation CLI for AI agents, powered by Lightpanda (fork of agent-browser)",
+  "name": "agent-browser",
+  "version": "0.39.0",
+  "description": "Browser automation CLI for AI agents",
   "type": "module",
   "packageManager": "pnpm@11.1.3",
   "engines": {
@@ -38,7 +38,6 @@
     "automation",
     "headless",
     "chrome",
-    "lightpanda",
     "cdp",
     "cli",
     "agent"
@@ -46,11 +45,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Curling-AI/light-agent-browser.git"
+    "url": "git+https://github.com/vercel-labs/agent-browser.git"
   },
   "bugs": {
-    "url": "https://github.com/Curling-AI/light-agent-browser/issues"
+    "url": "https://github.com/vercel-labs/agent-browser/issues"
   },
-  "homepage": "https://github.com/Curling-AI/light-agent-browser#readme",
+  "homepage": "https://agent-browser.dev",
   "devDependencies": {}
 }

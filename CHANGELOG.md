@@ -1,8 +1,26 @@
 # light-agent-browser
 
-## 0.38.3
+## 0.39.0 (light-agent-browser)
 
 <!-- release:start -->
+### New Features
+
+- **Hardened renderer service** - `agent-browser renderer serve` now treats requests as untrusted: page scripts stay off, every subresource is checked and only http(s) to public addresses loads (cloud metadata, loopback and private networks are blocked), renders have an 85s deadline, viewports are capped, Chrome is recycled every 200 renders (`--recycle-after`), and a network listener without a token is refused unless `--allow-unauthenticated` is passed (#5)
+- **Live captures for charts** - Pages with a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts) are captured by a short-lived local Chrome that runs the page (`renderer: chrome-live`, `rendererReason`). With a remote renderer, local pages (`file://`, localhost, private addresses) are captured live too. When a live capture is needed but no Chrome is installed, the command warns (`rendererWarning`) (#6)
+- **`file://` with Lightpanda** - Navigating to a `file://` URL relaunches a default-engine session with Chrome; an explicit `--engine lightpanda` fails with a hint instead (#6)
+- **Per-caller renderer tokens, limits and metrics** - `renderer serve` accepts per-caller HMAC tokens (`AGENT_BROWSER_RENDERER_HMAC_KEY`, `agent-browser renderer token <caller>`), limits each caller's concurrent and per-minute renders with `429` and `Retry-After`, exposes `GET /metrics`, and logs one JSON line per request (#7)
+
+### Improvements
+
+- **Based on agent-browser 0.39.0** - Includes upstream 0.39.0: the experimental Obscura engine, private CA trust for CLI HTTPS requests, and the snapshot, auto-connect and daemon fixes listed under 0.39.0 below
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.38.3
+
 ### New Features
 
 - **PDFs through the renderer** - With Lightpanda, `agent-browser pdf` now prints the page through the same Chrome renderer as screenshots (local or `agent-browser renderer serve`), so PDFs keep the page's layout, styles, and form values instead of Lightpanda's text-only output. `--screenshot-renderer` applies to PDFs too, `native` keeps the text-only PDF, and the MCP `agent_browser_pdf` tool accepts `renderer` (#3)
@@ -15,7 +33,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.38.2 (light-agent-browser)
 
@@ -35,6 +52,33 @@
 ### Contributors
 
 - @m4n3z40
+
+## 0.39.0
+
+### New Features
+
+- Added an experimental **Obscura engine** (`--engine obscura`), launched and cleaned up locally like Chrome with bounded startup and CLI/MCP support. Obscura still has accessibility and rendering gaps, so review the engine page before choosing it (#1876)
+- Added **private CA trust for CLI HTTPS requests** so `read`, `install`, `upgrade` and `doctor` work behind TLS inspection. `--ca-cert` now applies to them on every platform, the new `--use-system-ca` uses the operating system trust store, and `SSL_CERT_FILE` is a fallback. Certificate verification always stays on (#2006)
+
+### Bug Fixes
+
+- Fixed **selector-scoped snapshots** (`snapshot -s`) so elements under ignored wrappers are no longer printed twice and shadow root content of a selected custom element is no longer dropped (#2043)
+- Fixed **`--auto-connect`** to wait up to 30s while Chrome 144+ shows the remote-debugging prompt, so it no longer opens repeated prompts or fails with "No running Chrome instance found" (#2026)
+- Fixed **daemon responsiveness during long commands** so it keeps accepting connections, including `close`, while a command holds the state lock, and a SIGTERM sent in that window is no longer lost (#2059)
+
+### Documentation
+
+- Migrated the **docs site** to Geistdocs (#1887)
+
+### Contributors
+
+- @NamanSatish
+- @Railly
+- @SGavrl
+- @SUSINDRAREDDY
+- @godtail
+- @jadenfix
+- @niieani
 
 ## 0.38.2
 

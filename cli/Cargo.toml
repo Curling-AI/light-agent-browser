@@ -1,11 +1,11 @@
 [package]
 name = "agent-browser"
-version = "0.38.3"
+version = "0.39.0"
 edition = "2021"
-description = "Lightweight browser automation CLI for AI agents, powered by Lightpanda (light-agent-browser)"
+description = "Fast browser automation CLI for AI agents"
 license = "Apache-2.0"
-repository = "https://github.com/Curling-AI/light-agent-browser"
-homepage = "https://github.com/Curling-AI/light-agent-browser#readme"
+repository = "https://github.com/vercel-labs/agent-browser"
+homepage = "https://agent-browser.dev"
 readme = "../README.md"
 keywords = ["browser", "automation", "ai", "cdp", "chrome"]
 categories = ["command-line-utilities", "web-programming"]
