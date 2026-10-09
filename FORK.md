@@ -54,4 +54,6 @@ When resolving conflicts, keep upstream's version of a hunk and re-apply the for
 - add a new screenshot or PDF entry point (route it through `render::capture_screenshot` or `render::capture_pdf`)
 - change `install.rs` or the Lightpanda launcher
 
+Upstream release commits conflict in the version files (`package.json`, `cli/Cargo.toml`, `cli/Cargo.lock`, `packages/*`) and in both changelogs. Never resolve them by taking upstream's whole file (`git checkout --theirs`): `package.json` and `cli/Cargo.toml` carry the fork's identity (npm name `light-agent-browser`, repository, homepage, description, keywords), and a release with upstream's name would try to publish `agent-browser`. Take only the version lines, then check that `git diff origin/main -- package.json cli/Cargo.toml` changes nothing but the version. In `CHANGELOG.md`, keep exactly one `release:start`/`release:end` pair, around the fork's entry for the release.
+
 Bump `LIGHTPANDA_VERSION` in `cli/src/lightpanda_install.rs` when adopting a new Lightpanda release.

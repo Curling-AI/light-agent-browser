@@ -1,6 +1,6 @@
 {
   "name": "light-agent-browser",
-  "version": "0.38.3",
+  "version": "0.39.0",
   "description": "Lightweight browser automation CLI for AI agents, powered by Lightpanda (fork of agent-browser)",
   "type": "module",
   "packageManager": "pnpm@11.1.3",
