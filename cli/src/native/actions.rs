@@ -4294,7 +4294,7 @@ async fn auto_launch_inner(
     apply_launch_mutator_plugins(state, &mut options, plugins).await?;
     let engine_choice = super::engine::resolve_launch_engine(engine.as_deref(), &options);
     state.pending_launch_warning = engine_choice.warning();
-    state.engine_is_default = engine.is_none();
+    state.engine_is_default = super::engine::is_unset(engine.as_deref());
     let engine = Some(engine_choice.engine);
     state.engine = engine.clone().unwrap_or_default();
     write_engine_file(&state.session_id, &state.engine);
@@ -5077,7 +5077,7 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
     let engine = if local_launch {
         let choice = super::engine::resolve_launch_engine(engine.as_deref(), &launch_options);
         launch_warning = choice.warning();
-        state.engine_is_default = engine.is_none();
+        state.engine_is_default = super::engine::is_unset(engine.as_deref());
         Some(choice.engine)
     } else {
         engine

@@ -31,6 +31,13 @@ impl EngineChoice {
     }
 }
 
+/// Whether no engine was chosen. An empty value counts as unset, as it does
+/// in [`resolve_engine_with`], so an orchestrator can clear an engine an
+/// image pinned with `AGENT_BROWSER_ENGINE=`.
+pub fn is_unset(engine: Option<&str>) -> bool {
+    engine.is_none_or(|e| e.trim().is_empty())
+}
+
 /// Why `url` cannot be opened by `engine`, when only Chrome can open it.
 pub fn chrome_required_for_url(engine: &str, url: &str) -> Option<&'static str> {
     let is_file = url
@@ -143,6 +150,16 @@ fn is_lightpanda_binary(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_engine_counts_as_unset() {
+        use super::is_unset;
+        assert!(is_unset(None));
+        assert!(is_unset(Some("")));
+        assert!(is_unset(Some("  ")));
+        assert!(!is_unset(Some("lightpanda")));
+        assert!(!is_unset(Some("chrome")));
+    }
+
     #[test]
     fn only_lightpanda_needs_chrome_for_file_urls() {
         use super::chrome_required_for_url;
