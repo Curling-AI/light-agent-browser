@@ -130,6 +130,7 @@ agent-browser --screenshot-renderer chrome screenshot page.png     # require loc
 agent-browser --screenshot-renderer native screenshot text.png     # Lightpanda text-only PNG
 agent-browser --screenshot-renderer http://renderer:9300 screenshot # remote renderer service
 agent-browser renderer serve --host 0.0.0.0 --port 9300            # run the shared renderer
+agent-browser renderer token <caller>                              # per-caller token (AGENT_BROWSER_RENDERER_HMAC_KEY)
 ```
 
 `--json` responses include `renderer`: `chrome`, `remote`, or `lightpanda-text`. The remote renderer accepts `Authorization: Bearer $AGENT_BROWSER_RENDERER_TOKEN`; each screenshot forwards the caller's current token, so changing it needs no restart. Canvas pixels, video frames, and iframe state are not reproduced; use `--engine chrome` when they matter. With `--allowed-domains`, Chrome rendering is disabled (`auto` falls back to native) because the renderer would load resources outside the filter.

@@ -1104,7 +1104,9 @@ agent-browser open https://example.com
 agent-browser screenshot page.png                                   # rendered by the shared service
 ```
 
-The same variables apply to `agent-browser mcp`, whose tools run the CLI with the server's environment. Precedence is flag, then environment variable, then `screenshotRenderer` in `agent-browser.json`. The renderer service itself reads `AGENT_BROWSER_RENDERER_HOST`, `AGENT_BROWSER_RENDERER_PORT`, `AGENT_BROWSER_RENDERER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_RECYCLE_AFTER`, `AGENT_BROWSER_RENDERER_TOKEN`, and `AGENT_BROWSER_EXECUTABLE_PATH`.
+The same variables apply to `agent-browser mcp`, whose tools run the CLI with the server's environment. Precedence is flag, then environment variable, then `screenshotRenderer` in `agent-browser.json`. The renderer service itself reads `AGENT_BROWSER_RENDERER_HOST`, `AGENT_BROWSER_RENDERER_PORT`, `AGENT_BROWSER_RENDERER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_RECYCLE_AFTER`, `AGENT_BROWSER_RENDERER_TOKEN`, `AGENT_BROWSER_RENDERER_HMAC_KEY`, `AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY`, `AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE`, and `AGENT_BROWSER_EXECUTABLE_PATH`.
+
+For a fleet, give each agent its own token instead of sharing one. With `AGENT_BROWSER_RENDERER_HMAC_KEY` set, the service accepts `<caller>.<hex HMAC-SHA256(key, caller)>` (caller ids use letters, digits, `-`, `_` and `:`), so an orchestrator can issue tokens without calling the service, and `agent-browser renderer token <caller>` prints one. Each caller is limited on its own (`--per-caller-concurrency`, default 2; `--per-caller-per-minute`, default 30) and gets `429` with `Retry-After` past either; requests on the shared token are not limited per caller. `GET /metrics` serves Prometheus counters (requests by outcome, in-flight renders, a render duration histogram, Chrome launches) without caller labels, and every request logs one JSON line with its caller, outcome, status, duration and page host (never the full URL).
 
 A container image and a Kubernetes example live in [`docker/renderer/`](docker/renderer/):
 

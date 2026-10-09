@@ -254,6 +254,8 @@ AGENT_BROWSER_RENDERER_TOKEN=change-me agent-browser renderer serve --host 0.0.0
     <tr><td><code>--max-body-mb &lt;mb&gt;</code></td><td></td><td><code>32</code> MB maximum request size</td></tr>
     <tr><td><code>--recycle-after &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_RECYCLE_AFTER</code></td><td>Relaunch Chrome every <code>200</code> renders</td></tr>
     <tr><td><code>--allow-unauthenticated</code></td><td></td><td>Off: a non-loopback host requires a token</td></tr>
+    <tr><td><code>--per-caller-concurrency &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY</code></td><td><code>2</code> renders in flight per caller token</td></tr>
+    <tr><td><code>--per-caller-per-minute &lt;n&gt;</code></td><td><code>AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE</code></td><td><code>30</code> renders per minute per caller token</td></tr>
     <tr><td><code>--executable-path &lt;path&gt;</code></td><td><code>AGENT_BROWSER_EXECUTABLE_PATH</code></td><td>Auto-discovered Chrome</td></tr>
   </tbody>
 </table>
@@ -266,6 +268,7 @@ The service exposes two endpoints:
   </thead>
   <tbody>
     <tr><td><code>GET /healthz</code></td><td>Health probe. Returns <code>{'{"ok":true}'}</code></td></tr>
+    <tr><td><code>GET /metrics</code></td><td>Prometheus counters: requests by outcome, in-flight renders, render duration histogram, Chrome launches. No caller labels</td></tr>
     <tr><td><code>POST /v1/render</code></td><td>Accepts a JSON render request and returns <code>{'{"data": "<base64 image>", "annotations": [...]}'}</code>. Requires <code>Authorization: Bearer &lt;token&gt;</code> when <code>AGENT_BROWSER_RENDERER_TOKEN</code> is set</td></tr>
   </tbody>
 </table>
@@ -279,6 +282,12 @@ export AGENT_BROWSER_SCREENSHOT_RENDERER=http://renderer.internal:9300
 export AGENT_BROWSER_RENDERER_TOKEN=change-me
 agent-browser screenshot
 ```
+
+### Per-caller tokens
+
+A shared token cannot tell agents apart, and lets one of them starve the rest. Set `AGENT_BROWSER_RENDERER_HMAC_KEY` on the service and give each agent its own token, `<caller>.<hex HMAC-SHA256(key, caller)>`. Whoever holds the key can issue tokens without calling the service; `agent-browser renderer token <caller>` prints one. Caller ids use letters, digits, `-`, `_` and `:`.
+
+Each caller is limited on its own by `--per-caller-concurrency` and `--per-caller-per-minute`; past either it gets `429 Too Many Requests` with `Retry-After`. Requests on the shared token are not limited per caller, so the shared token keeps working while agents move to their own. Every request logs one JSON line with its caller, outcome, status, duration and page host (never the full URL, which can carry tokens).
 
 Clients send the token from `AGENT_BROWSER_RENDERER_TOKEN`. Each screenshot forwards the caller's current value to the session daemon (falling back to the daemon's own environment), so changing it needs no restart. The token is stripped from command events shown in the dashboard.
 

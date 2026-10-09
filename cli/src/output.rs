@@ -3216,6 +3216,9 @@ agent-browser renderer serve - Run a shared screenshot renderer
 Usage: agent-browser renderer serve [--host <host>] [--port <port>]
                                     [--concurrency <n>] [--max-body-mb <mb>]
                                     [--recycle-after <n>] [--allow-unauthenticated]
+                                    [--per-caller-concurrency <n>]
+                                    [--per-caller-per-minute <n>]
+       agent-browser renderer token <caller>
 
 Serves POST /v1/render for agents that use the Lightpanda engine with
 --screenshot-renderer http(s)://host:port, and GET /healthz for probes.
@@ -3234,10 +3237,22 @@ Options:
   --recycle-after <n>    Relaunch Chrome after n renders (default: 200;
                          or AGENT_BROWSER_RENDERER_RECYCLE_AFTER)
   --allow-unauthenticated  Listen on a non-loopback address without a token
+  --per-caller-concurrency <n>  Renders in flight per caller token (default: 2;
+                         or AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY)
+  --per-caller-per-minute <n>   Renders per minute per caller token (default: 30;
+                         or AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE)
   --executable-path <p>  Chrome binary (or AGENT_BROWSER_EXECUTABLE_PATH)
 
+Per-caller tokens:
+  With AGENT_BROWSER_RENDERER_HMAC_KEY set, the service also accepts
+  "<caller>.<hex HMAC-SHA256(key, caller)>" and limits each caller on its
+  own (over the limit: 429 with Retry-After). `renderer token <caller>`
+  prints a caller's token. GET /metrics serves Prometheus counters without
+  caller labels; each request logs one JSON line with the caller.
+
 Environment:
-  AGENT_BROWSER_RENDERER_TOKEN  Require "Authorization: Bearer <token>"
+  AGENT_BROWSER_RENDERER_TOKEN     Shared token: "Authorization: Bearer <token>"
+  AGENT_BROWSER_RENDERER_HMAC_KEY  Key that signs per-caller tokens
 
 Examples:
   AGENT_BROWSER_RENDERER_TOKEN=secret agent-browser renderer serve --host 0.0.0.0

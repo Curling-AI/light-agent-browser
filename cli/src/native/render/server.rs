@@ -8,15 +8,17 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
+use super::callers::{Admission, Authenticator, CallerLimits, Throttled, HMAC_KEY_ENV};
 use super::chrome::ChromeRenderer;
 use super::guard::RenderPolicy;
+use super::metrics::{Metrics, Outcome};
 use super::RenderRequest;
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
@@ -42,6 +44,10 @@ pub struct ServeOptions {
     /// Listen on a non-loopback address without a token. Off by default:
     /// requests carry page cookies.
     pub allow_unauthenticated: bool,
+    /// Key that signs per-caller tokens (`AGENT_BROWSER_RENDERER_HMAC_KEY`).
+    pub hmac_key: Option<Vec<u8>>,
+    /// Ceilings for each caller with its own token.
+    pub caller_limits: CallerLimits,
 }
 
 impl Default for ServeOptions {
@@ -55,6 +61,8 @@ impl Default for ServeOptions {
             max_body_bytes: DEFAULT_MAX_BODY_BYTES,
             recycle_after: DEFAULT_RECYCLE_AFTER,
             allow_unauthenticated: false,
+            hmac_key: None,
+            caller_limits: CallerLimits::default(),
         }
     }
 }
@@ -75,6 +83,18 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
     if let Ok(n) = std::env::var("AGENT_BROWSER_RENDERER_RECYCLE_AFTER") {
         options.recycle_after = parse_number(&n, "AGENT_BROWSER_RENDERER_RECYCLE_AFTER")?;
     }
+    if let Ok(n) = std::env::var("AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY") {
+        options.caller_limits.concurrent =
+            parse_number(&n, "AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY")?;
+    }
+    if let Ok(n) = std::env::var("AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE") {
+        options.caller_limits.per_minute =
+            parse_number(&n, "AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE")?;
+    }
+    options.hmac_key = std::env::var(HMAC_KEY_ENV)
+        .ok()
+        .filter(|k| !k.is_empty())
+        .map(String::into_bytes);
     options.token = std::env::var(super::RENDERER_TOKEN_ENV)
         .ok()
         .filter(|t| !t.is_empty());
@@ -100,6 +120,14 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
             "--port" => options.port = parse_number(&value()?, "--port")?,
             "--concurrency" => options.concurrency = parse_number(&value()?, "--concurrency")?,
             "--executable-path" => options.executable_path = Some(value()?),
+            "--per-caller-concurrency" => {
+                options.caller_limits.concurrent =
+                    parse_number(&value()?, "--per-caller-concurrency")?
+            }
+            "--per-caller-per-minute" => {
+                options.caller_limits.per_minute =
+                    parse_number(&value()?, "--per-caller-per-minute")?
+            }
             "--recycle-after" => {
                 options.recycle_after = parse_number(&value()?, "--recycle-after")?
             }
@@ -113,6 +141,9 @@ pub fn parse_serve_args(args: &[String]) -> Result<ServeOptions, String> {
     }
     if options.concurrency == 0 {
         return Err("--concurrency must be at least 1".to_string());
+    }
+    if options.caller_limits.concurrent == 0 || options.caller_limits.per_minute == 0 {
+        return Err("Per-caller limits must be at least 1".to_string());
     }
     if options.recycle_after == 0 {
         return Err("--recycle-after must be at least 1".to_string());
@@ -131,6 +162,9 @@ struct ServerState {
     renderer: RwLock<ChromeRenderer>,
     options: ServeOptions,
     renders: AtomicU64,
+    auth: Authenticator,
+    admission: Admission,
+    metrics: Metrics,
 }
 
 async fn launch(options: &ServeOptions) -> Result<ChromeRenderer, String> {
@@ -143,11 +177,13 @@ async fn launch(options: &ServeOptions) -> Result<ChromeRenderer, String> {
 }
 
 pub async fn run(options: ServeOptions) -> Result<(), String> {
-    if options.token.is_none() && !is_loopback(&options.host) && !options.allow_unauthenticated {
+    let auth = Authenticator::new(options.token.clone(), options.hmac_key.clone());
+    if !auth.requires_auth() && !is_loopback(&options.host) && !options.allow_unauthenticated {
         return Err(format!(
-            "Refusing to serve on {} without a token: render requests carry page cookies. Set {} or pass --allow-unauthenticated",
+            "Refusing to serve on {} without a token: render requests carry page cookies. Set {} or {}, or pass --allow-unauthenticated",
             options.host,
-            super::RENDERER_TOKEN_ENV
+            super::RENDERER_TOKEN_ENV,
+            HMAC_KEY_ENV
         ));
     }
     let renderer = launch(&options).await?;
@@ -158,7 +194,7 @@ pub async fn run(options: ServeOptions) -> Result<(), String> {
         .local_addr()
         .map_err(|e| format!("Failed to read listener address: {}", e))?;
     println!("agent-browser renderer listening on http://{}", addr);
-    if options.token.is_none() && !is_loopback(&options.host) {
+    if !auth.requires_auth() && !is_loopback(&options.host) {
         eprintln!(
             "{} renderer is reachable from the network without a token; set {}",
             crate::color::warning_indicator(),
@@ -168,9 +204,13 @@ pub async fn run(options: ServeOptions) -> Result<(), String> {
 
     let state = Arc::new(ServerState {
         renderer: RwLock::new(renderer),
+        admission: Admission::new(options.caller_limits),
         options,
         renders: AtomicU64::new(0),
+        auth,
+        metrics: Metrics::default(),
     });
+    state.metrics.chrome_launched();
 
     loop {
         tokio::select! {
@@ -214,31 +254,119 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<ServerState>) -> Re
     let path = request.path.split('?').next().unwrap_or("");
     match (request.method.as_str(), path) {
         ("GET", "/healthz") => write_json(&mut stream, 200, &json!({ "ok": true })).await,
-        ("POST", "/v1/render") => {
-            if !authorized(
-                state.options.token.as_deref(),
-                request.authorization.as_deref(),
-            ) {
-                return write_json(&mut stream, 401, &json!({ "error": "Unauthorized" })).await;
-            }
-            let render_request: RenderRequest = match serde_json::from_slice(&request.body) {
-                Ok(r) => bounded(r),
-                Err(e) => {
-                    return write_json(
-                        &mut stream,
-                        400,
-                        &json!({ "error": format!("Invalid render request: {}", e) }),
-                    )
-                    .await
-                }
-            };
-            match render(&state, &render_request).await {
-                Ok(response) => write_json(&mut stream, 200, &json!(response)).await,
-                Err(e) => write_json(&mut stream, 500, &json!({ "error": e })).await,
-            }
+        ("GET", "/metrics") => {
+            let body = state.metrics.render_text();
+            write_response(&mut stream, 200, "text/plain; version=0.0.4", &body, &[]).await
         }
+        ("POST", "/v1/render") => handle_render(&mut stream, &state, &request).await,
         _ => write_json(&mut stream, 404, &json!({ "error": "Not found" })).await,
     }
+}
+
+/// Authenticates, admits, renders, and logs one `POST /v1/render`.
+async fn handle_render(
+    stream: &mut TcpStream,
+    state: &ServerState,
+    request: &HttpRequest,
+) -> Result<(), String> {
+    let started = Instant::now();
+    let Some(caller) = state.auth.authenticate(request.authorization.as_deref()) else {
+        log_request(state, None, Outcome::Unauthorized, 401, started, None);
+        return write_json(stream, 401, &json!({ "error": "Unauthorized" })).await;
+    };
+    let _permit = match state.admission.admit(&caller, started) {
+        Ok(permit) => permit,
+        Err(throttled) => {
+            log_request(state, Some(&caller), Outcome::Throttled, 429, started, None);
+            return write_throttled(stream, &throttled).await;
+        }
+    };
+    let render_request: RenderRequest = match serde_json::from_slice(&request.body) {
+        Ok(r) => bounded(r),
+        Err(e) => {
+            log_request(
+                state,
+                Some(&caller),
+                Outcome::BadRequest,
+                400,
+                started,
+                None,
+            );
+            let error = format!("Invalid render request: {}", e);
+            return write_json(stream, 400, &json!({ "error": error })).await;
+        }
+    };
+    let host = page_host(&render_request.url);
+    let result = {
+        let _in_flight = state.metrics.in_flight();
+        render(state, &render_request).await
+    };
+    state.metrics.observe_render(started.elapsed());
+    match result {
+        Ok(response) => {
+            log_request(
+                state,
+                Some(&caller),
+                Outcome::Ok,
+                200,
+                started,
+                host.as_deref(),
+            );
+            write_json(stream, 200, &json!(response)).await
+        }
+        Err(e) => {
+            log_request(
+                state,
+                Some(&caller),
+                Outcome::Error,
+                500,
+                started,
+                host.as_deref(),
+            );
+            write_json(stream, 500, &json!({ "error": e })).await
+        }
+    }
+}
+
+async fn write_throttled(stream: &mut TcpStream, throttled: &Throttled) -> Result<(), String> {
+    let retry_after = throttled.retry_after.as_secs().max(1);
+    let body = json!({ "error": format!("Rate limited: {}; retry in {}s", throttled.reason, retry_after) });
+    write_response(
+        stream,
+        429,
+        "application/json",
+        &body.to_string(),
+        &[("Retry-After", retry_after.to_string())],
+    )
+    .await
+}
+
+/// Only the host is logged: page URLs can carry tokens in their query.
+fn page_host(url: &str) -> Option<String> {
+    url::Url::parse(url).ok()?.host_str().map(String::from)
+}
+
+/// One JSON line per request: who, what happened, how long. No page content.
+fn log_request(
+    state: &ServerState,
+    caller: Option<&str>,
+    outcome: Outcome,
+    status: u16,
+    started: Instant,
+    host: Option<&str>,
+) {
+    state.metrics.record(outcome);
+    println!(
+        "{}",
+        json!({
+            "event": "render",
+            "caller": caller,
+            "outcome": outcome.as_str(),
+            "status": status,
+            "ms": started.elapsed().as_millis() as u64,
+            "host": host,
+        })
+    );
 }
 
 /// Clamps what a caller may make Chrome allocate.
@@ -267,7 +395,10 @@ async fn render(
         // A failed relaunch must not discard this render's result. The dead
         // renderer is replaced by the recovery path on the next request.
         match launch(&state.options).await {
-            Ok(fresh) => *renderer = fresh,
+            Ok(fresh) => {
+                state.metrics.chrome_launched();
+                *renderer = fresh
+            }
             Err(e) => eprintln!(
                 "{} Failed to relaunch Chrome after {} renders: {}",
                 crate::color::warning_indicator(),
@@ -285,28 +416,9 @@ async fn render(
     }
     renderer.shutdown().await;
     *renderer = launch(&state.options).await?;
+    state.metrics.chrome_launched();
     let renderer = tokio::sync::RwLockWriteGuard::downgrade(renderer);
     renderer.render(request).await
-}
-
-fn authorized(token: Option<&str>, header: Option<&str>) -> bool {
-    let Some(token) = token else {
-        return true;
-    };
-    let Some(presented) = header.and_then(|h| {
-        h.strip_prefix("Bearer ")
-            .or_else(|| h.strip_prefix("bearer "))
-    }) else {
-        return false;
-    };
-    constant_time_eq(token.trim().as_bytes(), presented.trim().as_bytes())
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 async fn read_request(
@@ -395,7 +507,16 @@ async fn write_json(
     status: u16,
     body: &serde_json::Value,
 ) -> Result<(), String> {
-    let payload = body.to_string();
+    write_response(stream, status, "application/json", &body.to_string(), &[]).await
+}
+
+async fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    payload: &str,
+    extra_headers: &[(&str, String)],
+) -> Result<(), String> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
@@ -404,14 +525,21 @@ async fn write_json(
         408 => "Request Timeout",
         411 => "Length Required",
         413 => "Payload Too Large",
+        429 => "Too Many Requests",
         431 => "Request Header Fields Too Large",
         _ => "Internal Server Error",
     };
+    let extra: String = extra_headers
+        .iter()
+        .map(|(name, value)| format!("{}: {}\r\n", name, value))
+        .collect();
     let response = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}Connection: close\r\n\r\n{}",
         status,
         reason,
+        content_type,
         payload.len(),
+        extra,
         payload
     );
     stream
@@ -454,6 +582,16 @@ mod tests {
             parse_serve_args(&args(&["--allow-unauthenticated", "--recycle-after", "50"])).unwrap();
         assert!(options.allow_unauthenticated);
         assert_eq!(options.recycle_after, 50);
+
+        let options = parse_serve_args(&args(&[
+            "--per-caller-concurrency",
+            "3",
+            "--per-caller-per-minute",
+            "90",
+        ]))
+        .unwrap();
+        assert_eq!(options.caller_limits.concurrent, 3);
+        assert_eq!(options.caller_limits.per_minute, 90);
     }
 
     #[tokio::test]
@@ -481,8 +619,11 @@ mod tests {
         options.executable_path = Some("/nonexistent/chrome".to_string());
         let state = ServerState {
             renderer: RwLock::new(renderer),
+            admission: Admission::new(options.caller_limits),
+            auth: Authenticator::default(),
             options,
             renders: AtomicU64::new(0),
+            metrics: Metrics::default(),
         };
         let request: RenderRequest = serde_json::from_value(serde_json::json!({
             "url": "about:blank",
@@ -527,16 +668,9 @@ mod tests {
         assert!(parse_serve_args(&args(&["--port"])).is_err());
         assert!(parse_serve_args(&args(&["--concurrency", "0"])).is_err());
         assert!(parse_serve_args(&args(&["--recycle-after", "0"])).is_err());
+        assert!(parse_serve_args(&args(&["--per-caller-concurrency", "0"])).is_err());
+        assert!(parse_serve_args(&args(&["--per-caller-per-minute", "0"])).is_err());
         assert!(parse_serve_args(&args(&["--bogus", "1"])).is_err());
-    }
-
-    #[test]
-    fn token_auth_requires_matching_bearer() {
-        assert!(authorized(None, None));
-        assert!(authorized(Some("s3cret"), Some("Bearer s3cret")));
-        assert!(!authorized(Some("s3cret"), Some("Bearer nope")));
-        assert!(!authorized(Some("s3cret"), Some("Basic s3cret")));
-        assert!(!authorized(Some("s3cret"), None));
     }
 
     #[test]

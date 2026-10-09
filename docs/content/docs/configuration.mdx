@@ -350,6 +350,9 @@ These environment variables configure additional daemon and runtime behavior:
     <tr><td><code>AGENT_BROWSER_RENDERER_PORT</code></td><td>Port for <code>agent-browser renderer serve</code>.</td><td><code>9300</code></td></tr>
     <tr><td><code>AGENT_BROWSER_RENDERER_CONCURRENCY</code></td><td>Parallel renders for <code>agent-browser renderer serve</code>.</td><td><code>4</code></td></tr>
     <tr><td><code>AGENT_BROWSER_RENDERER_RECYCLE_AFTER</code></td><td>Renders before <code>agent-browser renderer serve</code> relaunches Chrome.</td><td><code>200</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_HMAC_KEY</code></td><td>Key that signs per-caller tokens for <code>agent-browser renderer serve</code> and <code>agent-browser renderer token</code>.</td><td>(none)</td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_PER_CALLER_CONCURRENCY</code></td><td>Renders in flight per caller token.</td><td><code>2</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_RENDERER_PER_CALLER_PER_MINUTE</code></td><td>Renders per minute per caller token.</td><td><code>30</code></td></tr>
     <tr><td><code>AGENT_BROWSER_SOCKET_DIR</code></td><td>Advanced override for daemon socket files.</td><td>runtime dir or <code>~/.agent-browser</code></td></tr>
     <tr><td><code>AGENT_BROWSER_SKILLS_DIR</code></td><td>Override the directory used by <code>agent-browser skills</code>.</td><td>bundled skills</td></tr>
     <tr><td><code>AGENT_BROWSER_COLOR</code></td><td>Enable colored CLI output when truthy.</td><td>(disabled)</td></tr>

@@ -13,9 +13,11 @@
 //! - `native`: Lightpanda's own text-only render
 //! - `http(s)://host[:port]`: remote renderer service
 
+pub mod callers;
 pub mod chrome;
 pub mod guard;
 pub mod live;
+pub mod metrics;
 pub mod remote;
 pub mod server;
 
