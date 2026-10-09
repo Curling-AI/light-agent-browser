@@ -3,6 +3,16 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.39.1
+
+<p className="text-[#888] text-sm">October 9, 2026</p>
+
+### Bug Fixes
+
+- Fixed **an empty `AGENT_BROWSER_ENGINE` relaunching the browser** - The CLI read `AGENT_BROWSER_ENGINE=` as an engine choice, so every command sent a launch for the default engine. A session moved to Chrome for a `file://` page was relaunched back to Lightpanda on the next command and landed on `about:blank`. Empty now counts as unset in the CLI, as it already did in the daemon (#9)
+
+---
+
 ## v0.39.0 (light-agent-browser)
 
 <p className="text-[#888] text-sm">October 9, 2026</p>

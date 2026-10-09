@@ -1,8 +1,19 @@
 # light-agent-browser
 
-## 0.39.0 (light-agent-browser)
+## 0.39.1
 
 <!-- release:start -->
+### Bug Fixes
+
+- Fixed **an empty `AGENT_BROWSER_ENGINE` relaunching the browser** - The CLI read `AGENT_BROWSER_ENGINE=` as an engine choice, so every command sent a launch for the default engine. A session moved to Chrome for a `file://` page was relaunched back to Lightpanda on the next command and landed on `about:blank`. Empty now counts as unset in the CLI, as it already did in the daemon (#9)
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.39.0 (light-agent-browser)
+
 ### Breaking Changes
 
 - **`renderer serve` requires a token off loopback** - The service refuses to listen on a non-loopback address unless `AGENT_BROWSER_RENDERER_TOKEN` or `AGENT_BROWSER_RENDERER_HMAC_KEY` is set, because render requests carry page cookies. Pass `--allow-unauthenticated` to keep the old behavior (#5)
@@ -21,7 +32,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.38.3
 
