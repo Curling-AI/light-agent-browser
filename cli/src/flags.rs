@@ -646,7 +646,15 @@ pub fn parse_flags(args: &[String]) -> Flags {
             .or(config.confirm_actions),
         confirm_interactive: env_var_is_truthy("AGENT_BROWSER_CONFIRM_INTERACTIVE")
             || config.confirm_interactive.unwrap_or(false),
-        engine: env::var("AGENT_BROWSER_ENGINE").ok().or(config.engine),
+        // Empty counts as unset, as in the daemon: an orchestrator clears an
+        // engine an image pinned with `AGENT_BROWSER_ENGINE=`. Read as
+        // Some(""), every command sent a launch for the default engine, and a
+        // session the daemon had moved to Chrome (file://) was relaunched
+        // back to Lightpanda on the next command, landing on about:blank.
+        engine: env::var("AGENT_BROWSER_ENGINE")
+            .ok()
+            .filter(|e| !e.trim().is_empty())
+            .or(config.engine),
         screenshot_dir: env::var("AGENT_BROWSER_SCREENSHOT_DIR")
             .ok()
             .or(config.screenshot_dir),
@@ -1928,6 +1936,20 @@ mod tests {
         guard.remove("AGENT_BROWSER_CDP");
         let flags = parse_flags(&args("open example.com"));
         assert!(flags.cdp.is_none());
+    }
+
+    #[test]
+    fn test_empty_engine_env_is_unset() {
+        let guard = EnvGuard::new(&["AGENT_BROWSER_ENGINE"]);
+        guard.set("AGENT_BROWSER_ENGINE", "");
+        assert!(parse_flags(&args("get url")).engine.is_none());
+        guard.set("AGENT_BROWSER_ENGINE", "  ");
+        assert!(parse_flags(&args("get url")).engine.is_none());
+        guard.set("AGENT_BROWSER_ENGINE", "chrome");
+        assert_eq!(
+            parse_flags(&args("get url")).engine.as_deref(),
+            Some("chrome")
+        );
     }
 
     #[test]
