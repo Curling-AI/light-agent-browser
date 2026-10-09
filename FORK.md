@@ -13,7 +13,7 @@ This fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-br
 New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 - `cli/src/native/engine.rs`: default engine resolution and fallback rules
-- `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service; `live.rs` decides and runs live captures in a short-lived local Chrome; `guard.rs` holds the untrusted-input policy the service enforces (scripts off, public http(s) subresources only)
+- `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service; `callers.rs` verifies per-caller HMAC tokens and admits renders under per-caller limits; `metrics.rs` serves `/metrics`; `live.rs` decides and runs live captures in a short-lived local Chrome; `guard.rs` holds the untrusted-input policy the service enforces (scripts off, public http(s) subresources only)
 - `cli/src/lightpanda_install.rs`: Lightpanda download for `install`
 - `docker/renderer/`: renderer container image and Kubernetes example
 - `FORK.md`: this file

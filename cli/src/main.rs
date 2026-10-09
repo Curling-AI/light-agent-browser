@@ -1370,10 +1370,14 @@ fn run_close_all(flags: &Flags) {
 
 /// `agent-browser renderer serve [--host H] [--port P] [--concurrency N] [--recycle-after N]`
 fn run_renderer(args: &[String], flags: &Flags) {
+    if let Some(at) = args.iter().position(|a| a == "token") {
+        run_renderer_token(args.get(at + 1).map(String::as_str));
+        return;
+    }
     let serve_at = args.iter().position(|a| a == "serve");
     let Some(serve_at) = serve_at else {
         eprintln!(
-            "{} Usage: agent-browser renderer serve [--host <host>] [--port <port>] [--concurrency <n>] [--max-body-mb <mb>] [--recycle-after <n>] [--allow-unauthenticated]",
+            "{} Usage: agent-browser renderer serve [--host <host>] [--port <port>] [--concurrency <n>] [--max-body-mb <mb>] [--recycle-after <n>] [--per-caller-concurrency <n>] [--per-caller-per-minute <n>] [--allow-unauthenticated], or agent-browser renderer token <caller>",
             color::error_indicator()
         );
         exit(1);
@@ -1392,6 +1396,34 @@ fn run_renderer(args: &[String], flags: &Flags) {
     if let Err(e) = rt.block_on(native::render::server::run(options)) {
         eprintln!("{} {}", color::error_indicator(), e);
         exit(1);
+    }
+}
+
+/// `agent-browser renderer token <caller>`: prints the per-caller token that
+/// `renderer serve` accepts under `AGENT_BROWSER_RENDERER_HMAC_KEY`.
+fn run_renderer_token(caller: Option<&str>) {
+    let Some(caller) = caller else {
+        eprintln!(
+            "{} Usage: agent-browser renderer token <caller>",
+            color::error_indicator()
+        );
+        exit(1);
+    };
+    let key = env::var(native::render::callers::HMAC_KEY_ENV).unwrap_or_default();
+    if key.is_empty() {
+        eprintln!(
+            "{} Set {} to the key the renderer service uses",
+            color::error_indicator(),
+            native::render::callers::HMAC_KEY_ENV
+        );
+        exit(1);
+    }
+    match native::render::callers::issue_token(key.as_bytes(), caller) {
+        Ok(token) => println!("{}", token),
+        Err(e) => {
+            eprintln!("{} {}", color::error_indicator(), e);
+            exit(1);
+        }
     }
 }
 
