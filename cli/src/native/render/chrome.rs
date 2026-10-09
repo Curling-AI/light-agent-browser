@@ -29,6 +29,11 @@ const RENDER_DEADLINE: Duration = Duration::from_secs(85);
 /// Page events buffered for the render while the request gate answers
 /// `Fetch.requestPaused`. Overflow drops page events, never paused requests.
 const PAGE_EVENT_BUFFER: usize = 1024;
+/// Raw session events buffered for the request gate. The default private
+/// session buffer holds 16 and drops the rest; a page that requests dozens
+/// of subresources at once lost pauses that way, and each lost pause hung the
+/// render until its load deadline (github.com: 15s to 120s instead of 0.5s).
+const SESSION_EVENT_BUFFER: usize = 4096;
 
 pub struct ChromeRenderer {
     process: ChromeProcess,
@@ -158,7 +163,7 @@ impl ChromeRenderer {
             .ok_or("Target.attachToTarget returned no sessionId")?
             .to_string();
 
-        let raw_events = client.subscribe_session(&session_id);
+        let raw_events = client.subscribe_session_with_buffer(&session_id, SESSION_EVENT_BUFFER);
         let (forward, mut events) = mpsc::channel(PAGE_EVENT_BUFFER);
         let gate = RequestGate {
             client: client.clone(),

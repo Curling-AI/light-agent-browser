@@ -1203,6 +1203,42 @@ async fn e2e_renderer_service_policy_blocks_scripts_and_private_network() {
     service.shutdown().await;
 }
 
+/// A page that requests many subresources at once must not lose any of the
+/// pauses the request gate answers: a lost pause hangs the render until its
+/// load deadline (github.com took 15s to 120s instead of 0.5s).
+#[tokio::test]
+#[ignore]
+async fn e2e_renderer_service_answers_every_paused_request() {
+    use crate::native::render::chrome::ChromeRenderer;
+    use crate::native::render::guard::RenderPolicy;
+    use crate::native::render::RenderRequest;
+
+    if crate::native::cdp::chrome::find_chrome().is_none() {
+        return;
+    }
+    let images: String = (0..200)
+        .map(|i| format!("<img src=\"https://1.1.1.1/burst-{i}.png\" width=1 height=1>"))
+        .collect();
+    let request: RenderRequest = serde_json::from_value(json!({
+        "url": "https://example.com/",
+        "html": format!("<!doctype html><html><body><p>burst</p>{images}</body></html>"),
+        "viewport": { "width": 800, "height": 600 },
+        "timeoutMs": 20000,
+    }))
+    .unwrap();
+    let mut service = ChromeRenderer::launch_with(None, 1, RenderPolicy::SERVICE)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    service.render(&request).await.unwrap();
+    let elapsed = started.elapsed();
+    service.shutdown().await;
+    assert!(
+        elapsed < std::time::Duration::from_secs(10),
+        "render took {elapsed:?}: a paused request was never answered"
+    );
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_lightpanda_screenshot_renderers() {
