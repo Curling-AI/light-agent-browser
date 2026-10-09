@@ -1239,6 +1239,191 @@ async fn e2e_renderer_service_answers_every_paused_request() {
     );
 }
 
+const RED_CANVAS_PAGE: &str = "<!doctype html><html><body style=\"margin:0;background:#fff\">\
+<canvas id=\"k\" width=\"300\" height=\"300\"></canvas>\
+<script>const c = document.getElementById('k').getContext('2d'); c.fillStyle = '#ff0000'; c.fillRect(0, 0, 300, 300);</script>\
+</body></html>";
+
+/// A local page without charts: a capture must paint the session's DOM, which
+/// keeps the typed value, instead of reloading the page.
+const LOCAL_FORM_PAGE: &str = "<!doctype html><html><body><input id=\"name\"></body></html>";
+
+/// Hidden canvases (text measurement, tracking) are no reason to reload.
+const HIDDEN_CANVAS_PAGE: &str = "<!doctype html><html><body><p>text</p>\
+<canvas width=\"1\" height=\"1\" style=\"display:none\"></canvas>\
+<div hidden><canvas width=\"300\" height=\"300\"></canvas></div></body></html>";
+
+fn pixel_at(base64_png: &str, x: u32, y: u32) -> [u8; 3] {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_png)
+        .unwrap();
+    let img = image::load_from_memory(&bytes).unwrap().to_rgb8();
+    img.get_pixel(x, y).0
+}
+
+/// Canvas pixels only exist where the page's scripts ran: the live capture
+/// has them, the serialized render (the control) cannot.
+#[tokio::test]
+#[ignore]
+async fn e2e_live_capture_keeps_canvas_pixels() {
+    use crate::native::render::chrome::ChromeRenderer;
+    use crate::native::render::guard::RenderPolicy;
+    use crate::native::render::{live, RenderRequest};
+
+    if crate::native::cdp::chrome::find_chrome().is_none() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("canvas.html");
+    std::fs::write(&page, RED_CANVAS_PAGE).unwrap();
+    let url = format!("file://{}", page.display());
+    let mut request: RenderRequest = serde_json::from_value(json!({
+        "url": url,
+        "html": RED_CANVAS_PAGE.replace("<script>", "<noscript>").replace("</script>", "</noscript>"),
+        "viewport": { "width": 400, "height": 400 },
+    }))
+    .unwrap();
+
+    let local = ChromeRenderer::launch_with(None, 1, RenderPolicy::LOCAL)
+        .await
+        .unwrap();
+    let serialized = local.render(&request).await.unwrap();
+    assert_eq!(
+        pixel_at(&serialized.data, 50, 50),
+        [255, 255, 255],
+        "control"
+    );
+
+    request.live = true;
+    let shot = live::capture(&request).await.unwrap();
+    assert_eq!(pixel_at(&shot.data, 50, 50), [255, 0, 0], "live capture");
+
+    // A service renderer never runs a live request, even if one reached it.
+    let mut service = ChromeRenderer::launch_with(None, 1, RenderPolicy::SERVICE)
+        .await
+        .unwrap();
+    assert!(service.render(&request).await.is_err());
+    service.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn e2e_lightpanda_canvas_pages_go_live() {
+    let lightpanda_bin = match std::env::var("LIGHTPANDA_BIN") {
+        Ok(path) if !path.is_empty() => path,
+        _ => return,
+    };
+    if crate::native::cdp::chrome::find_chrome().is_none() {
+        return;
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = [0u8; 2048];
+                let n = stream.read(&mut buf).await.unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]);
+                let body = if request.starts_with("GET /form ") {
+                    LOCAL_FORM_PAGE
+                } else if request.starts_with("GET /hidden ") {
+                    HIDDEN_CANVAS_PAGE
+                } else {
+                    RED_CANVAS_PAGE
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes()).await;
+                let _ = stream.write_all(body.as_bytes()).await;
+            });
+        }
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut state = DaemonState::new();
+    assert_success(
+        &execute_command(
+            &json!({ "id": "1", "action": "launch", "headless": true, "engine": "lightpanda", "executablePath": lightpanda_bin }),
+            &mut state,
+        )
+        .await,
+    );
+    assert_success(
+        &execute_command(
+            &json!({ "id": "2", "action": "navigate", "url": format!("http://127.0.0.1:{port}/") }),
+            &mut state,
+        )
+        .await,
+    );
+    let path = dir.path().join("live.png");
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "screenshot", "path": path.to_str().unwrap(), "renderer": "chrome" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let data = get_data(&resp);
+    assert_eq!(data["renderer"], "chrome-live");
+    // A local renderer reaches local pages; only the chart forces a reload.
+    assert_eq!(data["rendererReason"], "canvas");
+    let img = image::open(&path).unwrap().to_rgb8();
+    assert_eq!(img.get_pixel(50, 50).0, [255, 0, 0]);
+
+    // A local page without charts keeps the serialized DOM and its typed value.
+    for (id, page) in [("form", "/form"), ("hidden", "/hidden")] {
+        assert_success(
+            &execute_command(
+                &json!({ "id": format!("{id}-nav"), "action": "navigate", "url": format!("http://127.0.0.1:{port}{page}") }),
+                &mut state,
+            )
+            .await,
+        );
+        if id == "form" {
+            assert_success(
+                &execute_command(
+                    &json!({ "id": "fill", "action": "fill", "selector": "#name", "value": "typed" }),
+                    &mut state,
+                )
+                .await,
+            );
+        }
+        let path = dir.path().join(format!("{id}.png"));
+        let resp = execute_command(
+            &json!({ "id": id, "action": "screenshot", "path": path.to_str().unwrap(), "renderer": "chrome" }),
+            &mut state,
+        )
+        .await;
+        assert_success(&resp);
+        assert_eq!(get_data(&resp)["renderer"], "chrome", "{id}: {resp}");
+        assert!(
+            get_data(&resp).get("rendererReason").is_none(),
+            "{id}: {resp}"
+        );
+    }
+
+    // Lightpanda cannot open file:// at all; an explicit engine is never
+    // switched behind the caller's back, so the error says what to do.
+    let page = dir.path().join("canvas.html");
+    std::fs::write(&page, RED_CANVAS_PAGE).unwrap();
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "navigate", "url": format!("file://{}", page.display()) }),
+        &mut state,
+    )
+    .await;
+    let error = resp["error"].as_str().unwrap_or_default();
+    assert!(
+        error.contains("Lightpanda cannot open file:// URLs"),
+        "{resp}"
+    );
+    assert!(error.contains("--engine chrome"), "{resp}");
+
+    assert_success(&execute_command(&json!({ "id": "5", "action": "close" }), &mut state).await);
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_lightpanda_screenshot_renderers() {

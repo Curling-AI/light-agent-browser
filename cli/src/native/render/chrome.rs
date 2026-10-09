@@ -34,6 +34,9 @@ const PAGE_EVENT_BUFFER: usize = 1024;
 /// of subresources at once lost pauses that way, and each lost pause hung the
 /// render until its load deadline (github.com: 15s to 120s instead of 0.5s).
 const SESSION_EVENT_BUFFER: usize = 4096;
+/// Live captures run the page's scripts; chart libraries animate for about a
+/// second after load (Chart.js defaults to 1000ms).
+const LIVE_SETTLE_DELAY: Duration = Duration::from_millis(1200);
 
 pub struct ChromeRenderer {
     process: ChromeProcess,
@@ -87,6 +90,9 @@ impl ChromeRenderer {
     }
 
     pub async fn render(&self, request: &RenderRequest) -> Result<RenderResponse, String> {
+        if request.live && self.policy.disable_javascript {
+            return Err("Live captures are not allowed by this renderer's policy".to_string());
+        }
         let _slot = self
             .slots
             .acquire()
@@ -169,7 +175,7 @@ impl ChromeRenderer {
             client: client.clone(),
             session_id: session_id.clone(),
             policy: self.policy,
-            main_document: is_http_url(&request.url)
+            main_document: (!request.live && is_http_url(&request.url))
                 .then(|| base64::engine::general_purpose::STANDARD.encode(request.html.as_bytes())),
         };
         let gate_task = tokio::spawn(gate.run(raw_events, forward));
@@ -243,14 +249,18 @@ impl ChromeRenderer {
             .unwrap_or(DEFAULT_LOAD_TIMEOUT)
             .min(MAX_LOAD_TIMEOUT);
 
-        if is_http_url(&request.url) {
+        if request.live {
+            self.load_live(session_id, events, request, timeout).await?;
+            tokio::time::sleep(LIVE_SETTLE_DELAY).await;
+        } else if is_http_url(&request.url) {
             self.load_at_url(session_id, events, request, timeout)
                 .await?;
+            tokio::time::sleep(SETTLE_DELAY).await;
         } else {
             self.load_as_content(session_id, events, request, timeout)
                 .await?;
+            tokio::time::sleep(SETTLE_DELAY).await;
         }
-        tokio::time::sleep(SETTLE_DELAY).await;
 
         if request.output == "pdf" {
             let mut params = request
@@ -292,7 +302,10 @@ impl ChromeRenderer {
         };
 
         let options = ScreenshotOptions {
-            selector: request.target.then(|| format!("[{}]", TARGET_ATTR)),
+            selector: request
+                .live_selector
+                .clone()
+                .or_else(|| request.target.then(|| format!("[{}]", TARGET_ATTR))),
             path: None,
             full_page: request.full_page,
             format: if request.format == "jpeg" {
@@ -365,6 +378,43 @@ impl ChromeRenderer {
             }
         }
         Ok(())
+    }
+
+    /// Opens the page itself, scripts and all. Only reachable through
+    /// [`RenderRequest::live`], which never crosses the wire.
+    async fn load_live(
+        &self,
+        session_id: &str,
+        events: &mut mpsc::Receiver<CdpEvent>,
+        request: &RenderRequest,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let navigated = self
+            .client
+            .send_command(
+                "Page.navigate",
+                Some(json!({ "url": request.url })),
+                Some(session_id),
+            )
+            .await?;
+        if let Some(error) = navigated.get("errorText").and_then(|v| v.as_str()) {
+            return Err(format!(
+                "Live capture failed to load {}: {}",
+                request.url, error
+            ));
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            tokio::select! {
+                event = events.recv() => match event {
+                    Some(event) if event.method == "Page.loadEventFired" => return Ok(()),
+                    Some(_) => {}
+                    None => return Err("Renderer page closed while loading".to_string()),
+                },
+                // Slow subresources: capture what has rendered so far.
+                _ = tokio::time::sleep_until(deadline) => return Ok(()),
+            }
+        }
     }
 
     /// Routes requests through [`RequestGate`]: the main document when it is
