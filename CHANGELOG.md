@@ -1,8 +1,20 @@
 # light-agent-browser
 
-## 0.39.1
+## 0.39.2
 
 <!-- release:start -->
+### Bug Fixes
+
+- Fixed **Chrome refusing to start in a hardened Kubernetes pod** - A non-root pod under containerd with cgroup v2 has none of the container markers the sandbox check looked for (`/.dockerenv`, `/run/.containerenv`, a `kubepods` cgroup path), so Chrome kept its sandbox, found no user namespaces and exited, and `renderer serve` crash-looped. `KUBERNETES_SERVICE_HOST` now counts as a container marker (#12)
+- Fixed **commands running twice after a lost response** - A response lost after the request reached the daemon (EOF, reset, read timeout) was retried up to 5 times, so `click`, `fill`, `eval` or a navigation could run twice. Mutating and launch commands now fail with code `outcome_unknown`; read-only actions still retry (upstream #2085, #11)
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.39.1
+
 ### Bug Fixes
 
 - Fixed **an empty `AGENT_BROWSER_ENGINE` relaunching the browser** - The CLI read `AGENT_BROWSER_ENGINE=` as an engine choice, so every command sent a launch for the default engine. A session moved to Chrome for a `file://` page was relaunched back to Lightpanda on the next command and landed on `about:blank`. Empty now counts as unset in the CLI, as it already did in the daemon (#9)
@@ -10,7 +22,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.0 (light-agent-browser)
 
