@@ -1,8 +1,19 @@
 # light-agent-browser
 
-## 0.39.2
+## 0.39.3
 
 <!-- release:start -->
+### Improvements
+
+- **Upstream sync** - Merged upstream agent-browser v0.39.1 with a merge commit, so the fork no longer shows as behind `vercel-labs/agent-browser`. Upstream v0.39.1 only ships #2085 (no re-send of mutating commands after a lost response), which light-agent-browser already includes since 0.39.2. No behavior change
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.39.2
+
 ### Bug Fixes
 
 - Fixed **Chrome refusing to start in a hardened Kubernetes pod** - A non-root pod under containerd with cgroup v2 has none of the container markers the sandbox check looked for (`/.dockerenv`, `/run/.containerenv`, a `kubepods` cgroup path), so Chrome kept its sandbox, found no user namespaces and exited, and `renderer serve` crash-looped. `KUBERNETES_SERVICE_HOST` now counts as a container marker (#12)
@@ -11,7 +22,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.1
 
