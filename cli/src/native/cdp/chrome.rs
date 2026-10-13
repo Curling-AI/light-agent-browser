@@ -1593,32 +1593,40 @@ fn should_disable_sandbox(existing_args: &[String]) -> bool {
         return true;
     }
 
+    running_in_container()
+}
+
+/// Root, or one of the markers container runtimes leave behind.
+fn running_in_container() -> bool {
+    // Kubernetes injects this into every container. The file markers below miss
+    // a non-root pod under containerd with cgroup v2: no `/.dockerenv`, and the
+    // private cgroup namespace shows `0::/` instead of a kubepods path.
+    if std::env::var_os("KUBERNETES_SERVICE_HOST").is_some() {
+        return true;
+    }
+
     #[cfg(unix)]
     {
         // Root user -- standard container default, Chrome sandbox requires non-root
         if unsafe { libc::geteuid() } == 0 {
             return true;
         }
-
-        // Docker container
-        if Path::new("/.dockerenv").exists() {
+        // Docker and Podman
+        if Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists() {
             return true;
         }
-
-        // Podman container
-        if Path::new("/run/.containerenv").exists() {
-            return true;
-        }
-
-        // Generic container detection: cgroup contains docker/kubepods/lxc
         if let Ok(cgroup) = std::fs::read_to_string("/proc/1/cgroup") {
-            if cgroup.contains("docker") || cgroup.contains("kubepods") || cgroup.contains("lxc") {
+            if cgroup_names_a_container(&cgroup) {
                 return true;
             }
         }
     }
 
     false
+}
+
+fn cgroup_names_a_container(cgroup: &str) -> bool {
+    cgroup.contains("docker") || cgroup.contains("kubepods") || cgroup.contains("lxc")
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -1663,22 +1671,7 @@ fn should_disable_dev_shm(existing_args: &[String]) -> bool {
         return true;
     }
 
-    #[cfg(unix)]
-    {
-        if unsafe { libc::geteuid() } == 0 {
-            return true;
-        }
-        if Path::new("/.dockerenv").exists() || Path::new("/run/.containerenv").exists() {
-            return true;
-        }
-        if let Ok(cgroup) = std::fs::read_to_string("/proc/1/cgroup") {
-            if cgroup.contains("docker") || cgroup.contains("kubepods") || cgroup.contains("lxc") {
-                return true;
-            }
-        }
-    }
-
-    false
+    running_in_container()
 }
 
 /// Search Puppeteer's browser cache for a Chrome binary.
@@ -2003,6 +1996,16 @@ exec sleep 60
     fn test_read_devtools_active_port_missing() {
         let result = read_devtools_active_port(Path::new("/nonexistent"));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_cgroup_container_markers() {
+        assert!(cgroup_names_a_container(
+            "0::/kubepods.slice/kubepods-burstable.slice/cri-containerd-abc.scope\n"
+        ));
+        assert!(cgroup_names_a_container("12:pids:/docker/0123abcd\n"));
+        // cgroup v2 with a private namespace: no marker, hence the env check.
+        assert!(!cgroup_names_a_container("0::/\n"));
     }
 
     #[test]
