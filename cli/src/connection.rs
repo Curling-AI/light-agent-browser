@@ -816,6 +816,10 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
             match ready_existing_daemon_result(session, opts, Duration::from_secs(1)) {
                 Some(result) => return Ok(result),
                 None => {
+                    eprintln!(
+                        "{} Daemon settings changed, restarting (the open page will be closed)...",
+                        crate::color::warning_indicator()
+                    );
                     stop_existing_daemon_for_restart(session);
                     restarted = true;
                 }

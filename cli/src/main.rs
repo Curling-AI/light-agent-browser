@@ -352,8 +352,19 @@ fn attach_restore_config_to_command(cmd: &mut serde_json::Value, flags: &Flags) 
     }
 }
 
+/// Appended to a failed command's error when the daemon restarted for it: the
+/// restart closed the session's page, which is usually why the command failed.
+const RESTARTED_BACKGROUND_NOTE: &str = "The background daemon was restarted for this command (its version or settings changed, e.g. AGENT_BROWSER_DEBUG), which closed the session's open page. Run `open <url>` again, then retry.";
+
 fn mark_restarted_background(resp: &mut Response) {
     if !resp.success {
+        let error = resp.error.get_or_insert_with(String::new);
+        if !error.contains(RESTARTED_BACKGROUND_NOTE) {
+            if !error.is_empty() {
+                error.push_str(". ");
+            }
+            error.push_str(RESTARTED_BACKGROUND_NOTE);
+        }
         return;
     }
 
@@ -2487,6 +2498,40 @@ mod tests {
     }
 
     use super::*;
+
+    fn response(success: bool, data: Option<serde_json::Value>, error: Option<&str>) -> Response {
+        Response {
+            success,
+            data,
+            error: error.map(str::to_string),
+            code: None,
+            warning: None,
+        }
+    }
+
+    #[test]
+    fn restarted_background_marks_successful_lifecycle() {
+        let mut resp = response(true, Some(json!({ "url": "https://example.com" })), None);
+        mark_restarted_background(&mut resp);
+        assert_eq!(resp.data.unwrap()["lifecycle"]["restartedBackground"], true);
+    }
+
+    #[test]
+    fn restarted_background_explains_a_failure_once() {
+        let mut resp = response(false, None, Some("No page is open in this session"));
+        mark_restarted_background(&mut resp);
+        mark_restarted_background(&mut resp);
+        let error = resp.error.unwrap();
+        assert!(error.starts_with("No page is open in this session. "));
+        assert_eq!(error.matches(RESTARTED_BACKGROUND_NOTE).count(), 1);
+    }
+
+    #[test]
+    fn restarted_background_fills_an_empty_error() {
+        let mut resp = response(false, None, None);
+        mark_restarted_background(&mut resp);
+        assert_eq!(resp.error.as_deref(), Some(RESTARTED_BACKGROUND_NOTE));
+    }
 
     #[test]
     fn dashboard_config_comparison_rejects_unknown_or_changed_settings() {
