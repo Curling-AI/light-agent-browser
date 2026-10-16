@@ -1,8 +1,23 @@
 # light-agent-browser
 
-## 0.39.3
+## 0.39.4
 
 <!-- release:start -->
+### Bug Fixes
+
+- Fixed **a capture with no page reporting "The page has no document to render"** - On a Lightpanda session with no open page, `screenshot` and `pdf` now say no page is open and to run `open <url>`. The usual cause was a background daemon restart: `AGENT_BROWSER_DEBUG` and the other daemon settings are part of its configuration, so a command run with a different value restarts it and closes the page. A failed command that restarted the daemon now says so in its error (before, only successful responses got `restartedBackground`), and a settings-change restart warns on stderr like a version mismatch does (#15)
+
+### Improvements
+
+- **Upstream sync** - Merged upstream agent-browser main with a merge commit (#16): an error when the domain filter blocks a redirect (#2114), paused requests no longer dropped when the CDP broadcast lags (#2110), and native E2E without live sites or the Obscura binary (#2113). The fork's per-session event buffer for the renderer stays: upstream's lossless taps only see broadcast events
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.39.3
+
 ### Improvements
 
 - **Upstream sync** - Merged upstream agent-browser v0.39.1 with a merge commit, so the fork no longer shows as behind `vercel-labs/agent-browser`. Upstream v0.39.1 only ships #2085 (no re-send of mutating commands after a lost response), which light-agent-browser already includes since 0.39.2. No behavior change
@@ -10,7 +25,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.2
 
