@@ -580,6 +580,9 @@ const SERIALIZE_DOCUMENT_JS: &str = r#"(() => {
   };
 })()"#;
 
+const NO_PAGE_OPEN: &str =
+    "No page is open in this session, so there is nothing to capture. Run `open <url>` first";
+
 async fn build_render_request(
     ctx: &CaptureContext<'_>,
     options: &ScreenshotOptions,
@@ -622,7 +625,9 @@ async fn build_render_request(
     .await;
     let serialized = serialized?;
     if serialized.is_null() {
-        return Err("The page has no document to render".to_string());
+        // Lightpanda's blank target has no document at all: nothing was
+        // opened in this session, or a browser restart closed the page.
+        return Err(NO_PAGE_OPEN.to_string());
     }
 
     let cookies = ctx
