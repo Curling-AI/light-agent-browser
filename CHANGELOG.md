@@ -1,8 +1,20 @@
 # light-agent-browser
 
-## 0.39.4
+## 0.39.5
 
 <!-- release:start -->
+### Improvements
+
+- **Core skill: Lightpanda first, one Chrome session** - The engine guidance said to pass `--engine chrome` "for sites that need full Chrome fidelity", and models read it as a default: in a Kubernetes deployment most Chrome launches came before Lightpanda was tried, with up to six Chrome sessions alive in one pod. The core skill now says to stay on Lightpanda, to switch only after a page fails or renders blank or broken there (or for recording, streaming, or WebMCP), that switching a running session's engine loses the open page, and to keep a single Chrome session, opening more pages with `tab new` (#18)
+- **Core skill: memory in long loops** - New troubleshooting entry: a single-page app driven in one tab for hours can keep growing (one tab reached 1.8 GB of heap after 50 minutes of scripted clicks); reload it every few dozen iterations (#18)
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.39.4
+
 ### Bug Fixes
 
 - Fixed **a capture with no page reporting "The page has no document to render"** - On a Lightpanda session with no open page, `screenshot` and `pdf` now say no page is open and to run `open <url>`. The usual cause was a background daemon restart: `AGENT_BROWSER_DEBUG` and the other daemon settings are part of its configuration, so a command run with a different value restarts it and closes the page. A failed command that restarted the daemon now says so in its error (before, only successful responses got `restartedBackground`), and a settings-change restart warns on stderr like a version mismatch does (#15)
@@ -14,7 +26,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.3
 

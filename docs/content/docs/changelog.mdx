@@ -3,6 +3,17 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.39.5
+
+<p className="text-[#888] text-sm">October 20, 2026</p>
+
+### Improvements
+
+- **Core skill: Lightpanda first, one Chrome session** - The engine guidance said to pass `--engine chrome` "for sites that need full Chrome fidelity", and models read it as a default: in a Kubernetes deployment most Chrome launches came before Lightpanda was tried, with up to six Chrome sessions alive in one pod. The core skill now says to stay on Lightpanda, to switch only after a page fails or renders blank or broken there (or for recording, streaming, or WebMCP), that switching a running session's engine loses the open page, and to keep a single Chrome session, opening more pages with `tab new` (#18)
+- **Core skill: memory in long loops** - New troubleshooting entry: a single-page app driven in one tab for hours can keep growing (one tab reached 1.8 GB of heap after 50 minutes of scripted clicks); reload it every few dozen iterations (#18)
+
+---
+
 ## v0.39.4
 
 <p className="text-[#888] text-sm">October 16, 2026</p>
