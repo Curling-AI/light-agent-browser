@@ -26,6 +26,8 @@ Upstream files carry small, self-contained hooks:
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
 - `cli/src/install.rs`: `run_install` installs Lightpanda first; Chrome install moved to `install_chrome`
+- `cli/src/native/actions.rs`: `handle_tab_new` and `click --new-tab` refuse a second page on Lightpanda up front (`engine::second_page_error`), since Lightpanda serves one page per CDP connection
+- `cli/src/connection.rs`: `send_command` waits for the daemon to exit after a successful `close`, so the next command starts a fresh daemon (upstream #2134; drop this hook once upstream fixes it)
 - `cli/src/main.rs`: `renderer` command, install flags, launch warning printed on stderr
 - `cli/src/output.rs`: response warnings printed for every action, help text
 - `cli/src/flags.rs`, `cli/src/commands.rs`, `cli/src/mcp.rs`, `agent-browser.schema.json`: `--screenshot-renderer` plumbing, per-command `rendererToken` forwarding, and MCP parity

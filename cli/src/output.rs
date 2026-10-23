@@ -2701,6 +2701,9 @@ Tabs opened with `tab new` or `click --new-tab` inherit the session's user
 agent, headers, HTTP credentials, init scripts, routes, and emulation
 overrides before their first document loads.
 
+Lightpanda opens one page per session, so `tab new` fails there. Use
+`open <url>` to replace the page, a separate --session, or --engine chrome.
+
 Each session remembers its active tab (bound by CDP target id) and returns
 to it after a daemon restart. With --pin-tab, commands fail with a
 `tab_gone` error instead of falling back to another tab when the bound tab

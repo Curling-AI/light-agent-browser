@@ -6454,6 +6454,9 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
     let new_tab = cmd.get("newTab").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if new_tab {
+        if let Some(error) = super::engine::second_page_error(&state.engine, mgr.page_count()) {
+            return Err(error);
+        }
         use super::element::resolve_element_object_id;
         let (object_id, effective_session_id) = resolve_element_object_id(
             &mgr.client,
@@ -7801,6 +7804,11 @@ async fn handle_tab_list(state: &DaemonState) -> Result<Value, String> {
 }
 
 async fn handle_tab_new(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    if let Some(mgr) = state.browser.as_ref() {
+        if let Some(error) = super::engine::second_page_error(&state.engine, mgr.page_count()) {
+            return Err(error);
+        }
+    }
     let url = cmd.get("url").and_then(|v| v.as_str());
     let label = cmd.get("label").and_then(|v| v.as_str());
     let domain_filter = state.domain_filter.read().await.clone();
