@@ -3,6 +3,30 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.39.6
+
+<p className="text-[#888] text-sm">October 23, 2026</p>
+
+### New Features
+
+- **`file://` pages on Lightpanda** - Lightpanda refuses every scheme but http(s), so opening a local file used to relaunch the session with Chrome. `open file:///path/page.html` now stays on Lightpanda: the daemon serves the page, its scripts, stylesheets, images, links, and folder listings from disk through a reserved host (`http://file.agent-browser.invalid/...`) that never leaves the machine, and `open`, `get url`, `back`, and `tab list` show the `file://` URL. Pages can only load files from the folders the session opened (403 elsewhere, `..` and symlinks resolved first); `--allow-file-access` lifts that limit and no longer forces Chrome. Screenshots and PDFs of local pages read their stylesheets and images from the same folders. Local `.pdf` files still relaunch with Chrome, since Lightpanda has no PDF viewer (#20)
+
+### Bug Fixes
+
+- Fixed **a command right after `close` failing with `Invalid response: EOF`** - `close` answered before the daemon exited, and the daemon kept accepting connections meanwhile, so an `open` sent right after it reached the dying daemon. The CLI now waits for the daemon to exit after a successful `close` (about 0.13s), so the next command starts a fresh one. Upstream tracks the same bug as vercel-labs/agent-browser#2134 (#21)
+- Fixed **`tab new` and `click --new-tab` on Lightpanda failing with a raw `TargetAlreadyLoaded` CDP error** - Lightpanda serves one page per session. Both commands now refuse up front with an error that suggests `open <url>`, a separate `--session`, or `--engine chrome`, and leave the session's refs untouched (#21)
+
+### Security
+
+- **MCP renderer URLs come from the server only** - The MCP `screenshot`, `pdf`, and `diff_screenshot` tools accepted a renderer URL in their `renderer` argument, which let an MCP caller send the page's DOM and cookies to any host. The argument now accepts `auto`, `chrome`, or `native`; set a renderer URL with `AGENT_BROWSER_SCREENSHOT_RENDERER` or `screenshotRenderer` in the server's config. This follows upstream's rule that MCP callers cannot change network access (#22)
+
+### Improvements
+
+- **Upstream sync** - Merged upstream agent-browser v0.39.2 and the fixes published after it with merge commits (#19, #22). Highlights: `click` fails on hidden, disabled, or off-viewport elements instead of reporting success (#2173), an unreadable policy file denies actions (#2179), MCP rejects undeclared tool arguments (#2175) and `extraArgs` flags that change network, file, policy, or host access (#2181), an auto-discovered `./agent-browser.json` can no longer set `executablePath`, `args`, or `plugins` (#2180), the inspect WebSocket rejects other origins (#2182), the daemon only signals its own processes (#2183), `--cdp` sessions keep the attached browser across commands (#2155), ambiguous stale refs fail instead of picking another element (#2145), and commas inside `--args` values are kept (#2141)
+
+
+---
+
 ## v0.39.5
 
 <p className="text-[#888] text-sm">October 20, 2026</p>
