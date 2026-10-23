@@ -24,6 +24,18 @@
       {
         "from": "agent-browser pdf <path>              # Save page as PDF",
         "to": "agent-browser pdf <path>              # Save page as PDF\nagent-browser --screenshot-renderer native pdf <path>  # Lightpanda text-only PDF"
+      },
+      {
+        "from": "--allow-file-access      # Allow file:// URLs to access local files (Chromium only)",
+        "to": "--allow-file-access      # Let file:// pages load any local file (Lightpanda: lifts the opened-folder limit)"
+      },
+      {
+        "from": "The `--allow-file-access` flag enables JavaScript to access other local files. Chromium only.",
+        "to": "With Chrome, the `--allow-file-access` flag enables JavaScript to access other local files. With Lightpanda, `file://` pages open without it and can load files from the folders the session opened; the flag lifts that limit, and a local `.pdf` relaunches the session with Chrome. See [Lightpanda local files](/engines/lightpanda#local-files)."
+      },
+      {
+        "from": "The --allow-file-access flag enables JavaScript to access other local files. Chromium only.",
+        "to": "With Chrome, the --allow-file-access flag enables JavaScript to access other local files. With Lightpanda, file:// pages open without it and can load files from the folders the session opened; the flag lifts that limit, and a local .pdf relaunches the session with Chrome. See Lightpanda local files."
       }
     ],
     "/configuration": [
@@ -46,6 +58,14 @@
       {
         "from": "Browser engine to use: chrome (default), lightpanda, obscura (experimental).",
         "to": "Browser engine to use: lightpanda (default), chrome, obscura (experimental)."
+      },
+      {
+        "from": "<td>Allow <code>file://</code> URLs to access local files.</td>",
+        "to": "<td>Let <code>file://</code> pages load any local file. On Lightpanda, lifts the limit to the folders the session opened.</td>"
+      },
+      {
+        "from": "Allow file:// URLs to access local files.",
+        "to": "Let file:// pages load any local file. On Lightpanda, lifts the limit to the folders the session opened."
       }
     ],
     "/proxy": [
@@ -210,12 +230,26 @@
       {
         "from": "Depends on Lightpanda CDP support",
         "to": "Rendered by Chrome from the Lightpanda DOM (see Screenshots)"
+      },
+      {
+        "from": "<tr><td>File access (<code>--allow-file-access</code>)</td><td>Not supported</td></tr>",
+        "to": "<tr><td>File access (<code>--allow-file-access</code>)</td><td>Supported; lifts the opened-folder limit for <code>file://</code> pages (see <a href=\"#local-files\">Local files</a>)</td></tr>\n    <tr><td>PDF viewer</td><td>Not supported; a local <code>.pdf</code> opens in Chrome</td></tr>"
       }
     ],
     "/skills": [
       {
         "from": "npx skills add vercel-labs/agent-browser",
         "to": "npx skills add Curling-AI/light-agent-browser"
+      }
+    ],
+    "/files": [
+      {
+        "from": "`--allow-file-access` is Chromium-only. It allows `file://` pages to load and access other local files through browser APIs such as `fetch` and XHR.",
+        "to": "With Chrome, `--allow-file-access` allows `file://` pages to load and access other local files through browser APIs such as `fetch` and XHR.\n\nWith Lightpanda, the default engine, `file://` pages open without the flag: agent-browser serves them from disk through a reserved host, and the page can load files from the folders the session opened (other paths return 403). `--allow-file-access` lifts that limit. A local `.pdf` relaunches the session with Chrome. See [Lightpanda local files](/engines/lightpanda#local-files)."
+      },
+      {
+        "from": "--allow-file-access is Chromium-only. It allows file:// pages to load and access other local files through browser APIs such as fetch and XHR.",
+        "to": "With Chrome, --allow-file-access allows file:// pages to load and access other local files through browser APIs such as fetch and XHR."
       }
     ]
   },

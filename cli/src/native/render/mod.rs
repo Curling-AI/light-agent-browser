@@ -154,6 +154,10 @@ pub struct RenderRequest {
     /// Element to clip to in a live capture, as a CSS path.
     #[serde(skip)]
     pub live_selector: Option<String>,
+    /// Serves a `file://` page's subresources from disk. Never on the wire:
+    /// only the daemon's local renderer can read the agent's files.
+    #[serde(skip)]
+    pub local_files: Option<crate::native::file_url::FileUrls>,
 }
 
 fn default_format() -> String {
@@ -243,6 +247,8 @@ pub struct CaptureContext<'a> {
     /// Bearer token for a remote renderer: the command's `rendererToken`
     /// (forwarded by the CLI from its environment) or the daemon env.
     pub renderer_token: Option<String>,
+    /// Folders a `file://` page may load subresources from.
+    pub file_urls: &'a crate::native::file_url::FileUrls,
 }
 
 /// Token for a remote renderer: the command's value wins over the daemon env,
@@ -466,6 +472,9 @@ async fn live_request(
         ..options.clone()
     };
     let mut request = build_render_request(ctx, &plain).await?;
+    // Chrome opens a `file://` page itself rather than through the reserved host.
+    request.url = crate::native::file_url::display_url(&request.url);
+    request.local_files = None;
     request.html = String::new();
     request.live = true;
     request.live_selector = live_selector;
@@ -638,12 +647,16 @@ async fn build_render_request(
         .and_then(|v| v.get("cookies").and_then(|c| c.as_array()).cloned())
         .unwrap_or_default();
 
+    let url = serialized
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("about:blank")
+        .to_string();
+    let local_files = crate::native::file_url::to_file_url(&url)
+        .is_some()
+        .then(|| ctx.file_urls.clone());
     Ok(RenderRequest {
-        url: serialized
-            .get("url")
-            .and_then(|v| v.as_str())
-            .unwrap_or("about:blank")
-            .to_string(),
+        url,
         html: serialized
             .get("html")
             .and_then(|v| v.as_str())
@@ -673,6 +686,7 @@ async fn build_render_request(
         pdf: None,
         live: false,
         live_selector: None,
+        local_files,
     })
 }
 

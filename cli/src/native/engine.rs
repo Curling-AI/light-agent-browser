@@ -39,12 +39,15 @@ pub fn is_unset(engine: Option<&str>) -> bool {
 }
 
 /// Why `url` cannot be opened by `engine`, when only Chrome can open it.
+/// Lightpanda opens other `file://` pages through `file_url`, but it has no
+/// PDF viewer.
 pub fn chrome_required_for_url(engine: &str, url: &str) -> Option<&'static str> {
-    let is_file = url
-        .get(..5)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("file:"));
-    (engine.eq_ignore_ascii_case(DEFAULT_ENGINE) && is_file)
-        .then_some("Lightpanda cannot open file:// URLs")
+    if !engine.eq_ignore_ascii_case(DEFAULT_ENGINE) || !super::file_url::is_file_url(url) {
+        return None;
+    }
+    let path = url::Url::parse(url).ok()?.path().to_ascii_lowercase();
+    path.ends_with(".pdf")
+        .then_some("Lightpanda cannot display PDF files")
 }
 
 /// Resolves the engine for a local launch, probing for an installed Lightpanda.
@@ -126,9 +129,6 @@ pub fn chrome_only_option(options: &LaunchOptions) -> Option<&'static str> {
     if options.storage_state.is_some() {
         return Some("--state");
     }
-    if options.allow_file_access {
-        return Some("--allow-file-access");
-    }
     if options.webgpu {
         return Some("--webgpu");
     }
@@ -158,16 +158,6 @@ mod tests {
         assert!(is_unset(Some("  ")));
         assert!(!is_unset(Some("lightpanda")));
         assert!(!is_unset(Some("chrome")));
-    }
-
-    #[test]
-    fn only_lightpanda_needs_chrome_for_file_urls() {
-        use super::chrome_required_for_url;
-        assert!(chrome_required_for_url("lightpanda", "file:///tmp/a.html").is_some());
-        assert!(chrome_required_for_url("Lightpanda", "FILE:///tmp/a.html").is_some());
-        assert!(chrome_required_for_url("lightpanda", "https://example.com").is_none());
-        assert!(chrome_required_for_url("chrome", "file:///tmp/a.html").is_none());
-        assert!(chrome_required_for_url("lightpanda", "").is_none());
     }
 
     use super::*;
@@ -243,6 +233,17 @@ mod tests {
     }
 
     #[test]
+    fn only_lightpanda_pdfs_need_chrome() {
+        use super::chrome_required_for_url;
+        assert!(chrome_required_for_url("lightpanda", "file:///tmp/a.pdf").is_some());
+        assert!(chrome_required_for_url("Lightpanda", "FILE:///tmp/A.PDF?x#page=2").is_some());
+        assert!(chrome_required_for_url("lightpanda", "file:///tmp/a.html").is_none());
+        assert!(chrome_required_for_url("lightpanda", "https://example.com/a.pdf").is_none());
+        assert!(chrome_required_for_url("chrome", "file:///tmp/a.pdf").is_none());
+        assert!(chrome_required_for_url("lightpanda", "").is_none());
+    }
+
+    #[test]
     fn each_chrome_only_option_is_detected() {
         let cases: Vec<(LaunchOptions, &str)> = vec![
             (
@@ -265,13 +266,6 @@ mod tests {
                     ..LaunchOptions::default()
                 },
                 "--state",
-            ),
-            (
-                LaunchOptions {
-                    allow_file_access: true,
-                    ..LaunchOptions::default()
-                },
-                "--allow-file-access",
             ),
             (
                 LaunchOptions {

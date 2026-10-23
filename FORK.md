@@ -7,6 +7,7 @@ This fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-br
 - **Default engine.** Without an explicit `--engine`, local launches use Lightpanda and fall back to Chrome (with a warning) on Windows, when Lightpanda is not installed, with a non-Lightpanda `--executable-path`, or with Chrome-only options. Explicit engines, `--cdp`, `--auto-connect`, and providers behave exactly as upstream.
 - **Install.** `agent-browser install` downloads Lightpanda. `--with-chrome` and `--with-deps` add Chrome; `--engine chrome install` is the upstream behavior.
 - **Screenshots and PDFs.** Lightpanda pages are rendered by Chrome from a serialized DOM, either in-process or through `agent-browser renderer serve` (`--screenshot-renderer`).
+- **Local files.** Lightpanda only speaks http(s), so `file://` pages are served to it from disk through a reserved host (`http://file.agent-browser.invalid/...`), limited to the folders the session opened unless `--allow-file-access` is set. A local `.pdf` still relaunches the session with Chrome.
 
 ## Where the code lives
 
@@ -14,14 +15,16 @@ New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 - `cli/src/native/engine.rs`: default engine resolution and fallback rules
 - `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service; `callers.rs` verifies per-caller HMAC tokens and admits renders under per-caller limits; `metrics.rs` serves `/metrics`; `live.rs` decides and runs live captures in a short-lived local Chrome; `guard.rs` holds the untrusted-input policy the service enforces (scripts off, public http(s) subresources only)
+- `cli/src/native/file_url.rs`: `file://` pages on Lightpanda (URL mapping, allowed folders, serving files through `Fetch`)
 - `cli/src/lightpanda_install.rs`: Lightpanda download for `install`
 - `docker/renderer/`: renderer container image and Kubernetes example
 - `FORK.md`: this file
 
 Upstream files carry small, self-contained hooks:
 
-- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `engine_is_default`/`force_chrome` state and the `file://` relaunch in `handle_navigate`, `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
+- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `engine_is_default`/`force_chrome` state and the local `.pdf` relaunch in `handle_navigate`, `file_urls` state (recorded `--allow-file-access` at both launch paths, cleared on `close`, reserved URL in `handle_navigate` and `handle_tab_new`, reserved-host requests served first in the `Fetch` handler, its pattern in `build_fetch_patterns`, `session_setup_pending`, and `apply_session_setup`, and `file://` shown in every response through `execute_command`), `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
 - `cli/src/native/mod.rs`: module registration
+- `cli/src/native/browser.rs`: `validate_lightpanda_options` accepts `--allow-file-access`
 - `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior). Upstream's `subscribe_methods` (#2110) does not replace it: its lossless taps only see broadcast events, and a private session's events never reach the broadcast
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
@@ -34,7 +37,7 @@ Upstream files carry small, self-contained hooks:
 - `scripts/postinstall.js`: install reminder mentions Lightpanda
 - Documentation: `README.md`, `skill-data/core/`, `docs/content/docs/`
 
-The upstream e2e suite assumes Chrome without naming an engine, so test builds resolve an unset engine to Chrome (see `resolve_launch_engine`). Fork behavior is covered by unit tests in `engine.rs` and `render/` and by `e2e_lightpanda_screenshot_renderers`.
+The upstream e2e suite assumes Chrome without naming an engine, so test builds resolve an unset engine to Chrome (see `resolve_launch_engine`). Fork behavior is covered by unit tests in `engine.rs`, `file_url.rs`, and `render/` and by `e2e_lightpanda_screenshot_renderers` and `e2e_lightpanda_opens_file_urls`.
 
 ## Syncing with upstream
 

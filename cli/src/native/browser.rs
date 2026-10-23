@@ -92,9 +92,8 @@ fn validate_lightpanda_options(options: &LaunchOptions) -> Result<(), String> {
     if options.storage_state.is_some() {
         return Err("Storage state is not supported with Lightpanda".to_string());
     }
-    if options.allow_file_access {
-        return Err("File access is not supported with Lightpanda".to_string());
-    }
+    // `--allow-file-access` widens which files a `file://` page may load;
+    // see `file_url`.
     if !options.headless {
         return Err("Headed mode is not supported with Lightpanda (headless only)".to_string());
     }

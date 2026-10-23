@@ -1405,23 +1405,195 @@ async fn e2e_lightpanda_canvas_pages_go_live() {
         );
     }
 
-    // Lightpanda cannot open file:// at all; an explicit engine is never
-    // switched behind the caller's back, so the error says what to do.
-    let page = dir.path().join("canvas.html");
-    std::fs::write(&page, RED_CANVAS_PAGE).unwrap();
-    let resp = execute_command(
-        &json!({ "id": "4", "action": "navigate", "url": format!("file://{}", page.display()) }),
+    assert_success(&execute_command(&json!({ "id": "5", "action": "close" }), &mut state).await);
+}
+
+/// `execute_command` on the heap: this test's own future is large enough that,
+/// inline, a debug build overflows the 2 MB test thread stack.
+async fn run_boxed(cmd: &Value, state: &mut DaemonState) -> Value {
+    Box::pin(execute_command(cmd, state)).await
+}
+
+/// Lightpanda only speaks http(s); `file://` pages are served from disk
+/// through a reserved host, limited to the opened folders.
+#[tokio::test]
+#[ignore]
+async fn e2e_lightpanda_opens_file_urls() {
+    let lightpanda_bin = match std::env::var("LIGHTPANDA_BIN") {
+        Ok(path) if !path.is_empty() => path,
+        _ => return,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let site = dir.path().join("site");
+    std::fs::create_dir_all(site.join("sub")).unwrap();
+    std::fs::write(
+        site.join("index.html"),
+        "<!doctype html><html><head><title>Local page</title>\
+         <link rel=\"stylesheet\" href=\"style.css\"><script src=\"sub/app.js\"></script></head>\
+         <body><h1>Hello</h1><a id=\"next\" href=\"sub/other.html\">Other</a></body></html>",
+    )
+    .unwrap();
+    std::fs::write(
+        site.join("style.css"),
+        "body { background: rgb(255, 0, 0); }",
+    )
+    .unwrap();
+    std::fs::write(
+        site.join("sub/app.js"),
+        "document.addEventListener('DOMContentLoaded', () => { document.body.dataset.js = 'ran'; });",
+    )
+    .unwrap();
+    std::fs::write(
+        site.join("sub/other.html"),
+        "<!doctype html><title>Other</title><p>other</p>",
+    )
+    .unwrap();
+    std::fs::write(site.join("canvas.html"), RED_CANVAS_PAGE).unwrap();
+    std::fs::write(dir.path().join("secret.txt"), "secret").unwrap();
+    let index_url = url::Url::from_file_path(site.join("index.html"))
+        .unwrap()
+        .to_string();
+    let secret_path = dir.path().join("secret.txt").canonicalize().unwrap();
+    let fetch_secret = format!(
+        "fetch({:?}).then(r => r.status)",
+        secret_path.to_str().unwrap()
+    );
+
+    let mut state = DaemonState::new();
+    assert_success(
+        &run_boxed(
+            &json!({ "id": "1", "action": "launch", "headless": true, "engine": "lightpanda", "executablePath": lightpanda_bin }),
+            &mut state,
+        )
+        .await,
+    );
+    let resp = run_boxed(
+        &json!({ "id": "2", "action": "navigate", "url": index_url }),
         &mut state,
     )
     .await;
-    let error = resp["error"].as_str().unwrap_or_default();
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["url"], index_url.as_str());
+    assert_eq!(get_data(&resp)["title"], "Local page");
+
+    let resp = run_boxed(
+        &json!({ "id": "3", "action": "evaluate", "script": "document.body.dataset.js" }),
+        &mut state,
+    )
+    .await;
+    assert_eq!(get_data(&resp)["result"], "ran", "{resp}");
+
+    // The page shares one origin with every served file; only the opened
+    // folder answers.
+    let resp = run_boxed(
+        &json!({ "id": "4", "action": "evaluate", "script": fetch_secret }),
+        &mut state,
+    )
+    .await;
+    assert_eq!(get_data(&resp)["result"], 403, "{resp}");
+
+    if crate::native::cdp::chrome::find_chrome().is_some() {
+        // The local renderer loads the stylesheet from disk.
+        let path = dir.path().join("file.png");
+        let resp = run_boxed(
+            &json!({ "id": "5", "action": "screenshot", "path": path.to_str().unwrap(), "renderer": "chrome" }),
+            &mut state,
+        )
+        .await;
+        assert_success(&resp);
+        assert_eq!(get_data(&resp)["renderer"], "chrome", "{resp}");
+        let img = image::open(&path).unwrap().to_rgb8();
+        assert_eq!(img.get_pixel(400, 400).0, [255, 0, 0]);
+    }
+
+    assert_success(
+        &run_boxed(
+            &json!({ "id": "6", "action": "click", "selector": "#next" }),
+            &mut state,
+        )
+        .await,
+    );
+    // The click starts the navigation; poll until it lands.
+    let mut resp = Value::Null;
+    for _ in 0..50 {
+        resp = run_boxed(&json!({ "id": "7", "action": "url" }), &mut state).await;
+        if get_data(&resp)["url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/sub/other.html"))
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let url = get_data(&resp)["url"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     assert!(
-        error.contains("Lightpanda cannot open file:// URLs"),
+        url.starts_with("file://") && url.ends_with("/sub/other.html"),
         "{resp}"
     );
-    assert!(error.contains("--engine chrome"), "{resp}");
 
-    assert_success(&execute_command(&json!({ "id": "5", "action": "close" }), &mut state).await);
+    if crate::native::cdp::chrome::find_chrome().is_some() {
+        // A chart reloads the page in Chrome, which opens the file itself.
+        let canvas_url = url::Url::from_file_path(site.join("canvas.html"))
+            .unwrap()
+            .to_string();
+        assert_success(
+            &run_boxed(
+                &json!({ "id": "8", "action": "navigate", "url": canvas_url }),
+                &mut state,
+            )
+            .await,
+        );
+        let path = dir.path().join("canvas.png");
+        let resp = run_boxed(
+            &json!({ "id": "9", "action": "screenshot", "path": path.to_str().unwrap(), "renderer": "chrome" }),
+            &mut state,
+        )
+        .await;
+        assert_success(&resp);
+        assert_eq!(get_data(&resp)["renderer"], "chrome-live", "{resp}");
+        let img = image::open(&path).unwrap().to_rgb8();
+        assert_eq!(img.get_pixel(50, 50).0, [255, 0, 0]);
+    }
+
+    let resp = run_boxed(
+        &json!({ "id": "10", "action": "navigate", "url": url::Url::from_file_path(dir.path().join("missing.html")).unwrap().to_string() }),
+        &mut state,
+    )
+    .await;
+    assert!(
+        resp["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("File not found"),
+        "{resp}"
+    );
+    assert_success(&run_boxed(&json!({ "id": "11", "action": "close" }), &mut state).await);
+
+    // --allow-file-access lifts the folder limit.
+    assert_success(
+        &run_boxed(
+            &json!({ "id": "12", "action": "launch", "headless": true, "engine": "lightpanda", "executablePath": lightpanda_bin, "allowFileAccess": true }),
+            &mut state,
+        )
+        .await,
+    );
+    assert_success(
+        &run_boxed(
+            &json!({ "id": "13", "action": "navigate", "url": index_url }),
+            &mut state,
+        )
+        .await,
+    );
+    let resp = run_boxed(
+        &json!({ "id": "14", "action": "evaluate", "script": fetch_secret }),
+        &mut state,
+    )
+    .await;
+    assert_eq!(get_data(&resp)["result"], 200, "{resp}");
+    assert_success(&run_boxed(&json!({ "id": "15", "action": "close" }), &mut state).await);
 }
 
 #[tokio::test]

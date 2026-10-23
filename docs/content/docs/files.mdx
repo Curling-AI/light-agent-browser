@@ -69,7 +69,9 @@ agent-browser --allow-file-access open file:///path/to/page.html
 agent-browser screenshot ./local-file.png
 ```
 
-`--allow-file-access` is Chromium-only. It allows `file://` pages to load and access other local files through browser APIs such as `fetch` and XHR.
+With Chrome, `--allow-file-access` allows `file://` pages to load and access other local files through browser APIs such as `fetch` and XHR.
+
+With Lightpanda, the default engine, `file://` pages open without the flag: agent-browser serves them from disk through a reserved host, and the page can load files from the folders the session opened (other paths return 403). `--allow-file-access` lifts that limit. A local `.pdf` relaunches the session with Chrome. See [Lightpanda local files](/engines/lightpanda#local-files).
 
 ## Clipboard
 

@@ -1043,9 +1043,17 @@ When you pass `--engine` (or set `AGENT_BROWSER_ENGINE` or `engine` in config), 
 - the platform has no Lightpanda build (Windows)
 - Lightpanda is not installed (`agent-browser install` downloads it)
 - `--executable-path` points at a binary that is not Lightpanda
-- a Chrome-only option is set: `--headed`, `--profile`, `--extension`, `--state`, `--allow-file-access`, `--webgpu`, `--ca-cert`, or `--args`
+- a Chrome-only option is set: `--headed`, `--profile`, `--extension`, `--state`, `--webgpu`, `--ca-cert`, or `--args`
 
 `--cdp`, `--auto-connect`, and `--provider` attach to an existing browser and are unaffected. Pass `--engine chrome` to keep the previous Chrome default and silence the warning.
+
+### Opening file:// pages
+
+Lightpanda only speaks http(s), so agent-browser serves `file://` pages to it. `open file:///path/page.html` navigates Lightpanda to `http://file.agent-browser.invalid/path/page.html` and the daemon answers that host from disk through CDP `Fetch`, with the page's scripts, stylesheets, images, and links. Folders open as a listing. The `.invalid` host never resolves, so nothing leaves the machine. `open`, `get url`, `back`, and `tab list` show the `file://` URL; scripts in the page see the http one (`location.protocol` is `http:`).
+
+Every served file shares that one origin, so a page could `fetch()` any file the host serves. Requests are limited to the folders of the files the session opened (and their subfolders, after resolving `..` and symlinks); anything else gets a 403. `--allow-file-access` lifts the limit. The folders are forgotten on `close`. File pages cannot be opened while `--allowed-domains` is set.
+
+Lightpanda has no PDF viewer. Opening a local `.pdf` relaunches the session with Chrome and prints a warning when the engine came from the default; with an explicit `--engine lightpanda` it fails with a hint.
 
 ### Screenshots
 
@@ -1068,9 +1076,7 @@ agent-browser --screenshot-renderer native screenshot text.png
 
 PDFs use the same path: with Lightpanda, `agent-browser pdf` sends the serialized page to the renderer, which prints it with Chrome's `Page.printToPDF`, so the PDF keeps the page's layout and styles. `--screenshot-renderer` applies to both, `native` produces Lightpanda's own text-only PDF (selectable text and links, no CSS), and `--json` reports `data.renderer`. A renderer service from before PDF support returns an error instead of a PDF; update it.
 
-Pages a serialized render cannot reproduce are captured live instead: when the page has a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts), and, with a remote renderer only, when it is served from `file://`, loopback, or a private address (which a shared renderer cannot reach and refuses), a short-lived local Chrome opens the page with the session cookies, lets its scripts run, captures, and exits. `--json` then reports `"renderer": "chrome-live"` and `rendererReason` (`canvas`, `layout-chart`, `local-file`, or `local-server`). The live capture reloads the URL, so state that only exists after interactions is lost, and it is skipped with `--annotate`, with `--screenshot-renderer native`, and while `--allowed-domains` is active. A local renderer reaches local pages itself and paints the session's DOM, keeping typed values. When a live capture is needed but no Chrome is installed, the configured renderer captures what it can and the command warns (`rendererWarning` in `--json`). A shared renderer never captures live: the flag that requests it never crosses the wire.
-
-Lightpanda cannot open `file://` URLs. When the engine came from the default, navigating to one relaunches the session with Chrome and prints a warning; with an explicit `--engine lightpanda` the navigation fails with a hint.
+Pages a serialized render cannot reproduce are captured live instead: when the page has a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts), and, with a remote renderer only, when it is served from `file://`, loopback, or a private address (which a shared renderer cannot reach and refuses), a short-lived local Chrome opens the page with the session cookies, lets its scripts run, captures, and exits. `--json` then reports `"renderer": "chrome-live"` and `rendererReason` (`canvas`, `layout-chart`, `local-file`, or `local-server`). The live capture reloads the URL, so state that only exists after interactions is lost, and it is skipped with `--annotate`, with `--screenshot-renderer native`, and while `--allowed-domains` is active. A local renderer reaches local pages itself and paints the session's DOM, keeping typed values; for a `file://` page it reads the page's stylesheets and images from the same allowed folders. When a live capture is needed but no Chrome is installed, the configured renderer captures what it can and the command warns (`rendererWarning` in `--json`). A shared renderer never captures live: the flag that requests it never crosses the wire.
 
 Limitations of the serialized render: video frames, closed shadow roots, and cross-origin iframe state are not reproduced, nor are canvas pixels when no local Chrome is available for a live capture. Iframes reload from the network. Element screenshots inside iframes are not supported. The renderer fetches subresources directly, not through `--proxy`. While `--allowed-domains` is active, Chrome rendering is disabled because it would load resources outside the filter: `auto` uses the native render and `chrome` or a renderer URL fails.
 
@@ -1142,7 +1148,7 @@ docker run --rm -p 9300:9300 -e AGENT_BROWSER_RENDERER_TOKEN=change-me agent-bro
 | `--ca-cert <path>` | Trust a CA certificate or PEM bundle for the CLI's own HTTPS requests on every platform, and for locally launched Chromium on Linux; later commands in the same running session retain it when omitted (or `AGENT_BROWSER_CA_CERT` env) |
 | `--no-ca-cert` | Clear CA trust retained by the running browser session (or `AGENT_BROWSER_CLEAR_CA_CERT`) |
 | `--use-system-ca` | Use the operating system trust store for the CLI's own HTTPS requests: `read`, `install`, `upgrade`, `doctor` (or `AGENT_BROWSER_USE_SYSTEM_CA` env) |
-| `--allow-file-access` | Allow file:// URLs to access local files (Chromium only) |
+| `--allow-file-access` | Allow file:// pages to read any local file (Chromium flags; on Lightpanda, lifts the opened-folder limit) |
 | `--hide-scrollbars <bool>` | Hide native scrollbars in headless Chromium screenshots, enabled by default (or `AGENT_BROWSER_HIDE_SCROLLBARS` env) |
 | `-p, --provider <name>` | Browser provider, including configured `browser.provider` plugins (or `AGENT_BROWSER_PROVIDER` env) |
 | `--device <name>` | iOS device name, e.g. "iPhone 15 Pro" (or `AGENT_BROWSER_IOS_DEVICE` env) |
@@ -1596,13 +1602,13 @@ agent-browser --allow-file-access open file:///Users/me/report.pdf
 agent-browser screenshot report.png
 ```
 
-The `--allow-file-access` flag adds Chromium flags (`--allow-file-access-from-files`, `--allow-file-access`) that allow `file://` URLs to:
+With Chrome, the `--allow-file-access` flag adds Chromium flags (`--allow-file-access-from-files`, `--allow-file-access`) that allow `file://` URLs to:
 
 - Load and render local files
 - Access other local files via JavaScript (XHR, fetch)
 - Load local resources (images, scripts, stylesheets)
 
-**Note:** This flag only works with Chromium. For security, it's disabled by default.
+With Lightpanda, `file://` pages open without the flag and can load files from the folders the session opened; `--allow-file-access` lets them load any local file. PDFs need Chrome (see [Opening file:// pages](#opening-file-pages)). For security, the flag is disabled by default.
 
 ## CDP Mode
 

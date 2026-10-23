@@ -4143,7 +4143,8 @@ Options:
   --no-ca-cert               Clear CA trust retained by the running browser session
   --use-system-ca            Use the OS trust store for CLI requests (read, install, upgrade, doctor)
                              (or AGENT_BROWSER_USE_SYSTEM_CA)
-  --allow-file-access        Allow file:// URLs to access local files (Chromium only)
+  --allow-file-access        Let file:// pages load any local file (Chromium flags; on
+                             Lightpanda, lifts the limit to the folders the session opened)
   --hide-scrollbars <bool>   Hide native scrollbars in headless Chromium screenshots (default: true)
                              Use --hide-scrollbars false to keep scrollbars visible
   -p, --provider <name>      Browser provider: ios, browserbase, kernel, browseruse, browserless, agentcore, or plugin name
@@ -4180,8 +4181,9 @@ Options:
                              (or AGENT_BROWSER_ENGINE). Without an explicit engine, Chrome is
                              used on Windows, when Lightpanda is not installed, with a Chrome
                              --executable-path, or with Chrome-only options (--headed,
-                             --profile, --extension, --state, --allow-file-access, --webgpu,
-                             --ca-cert, --args); a warning names the reason. Obscura rejects --proxy-bypass,
+                             --profile, --extension, --state, --webgpu, --ca-cert, --args);
+                             a warning names the reason. Lightpanda opens file:// pages from
+                             disk; a local .pdf relaunches the session with Chrome. Obscura rejects --proxy-bypass,
                              proxyBypass config, AGENT_BROWSER_PROXY_BYPASS, NO_PROXY/no_proxy,
                              --webgpu, --ca-cert, --args, profiles, state, extensions,
                              headed mode, and file access. Discovery and CDP initialization
@@ -4262,7 +4264,7 @@ Environment:
                                  stopped. After daemon exit, inspect and stop the browser in Cloud.
   AGENT_BROWSER_AUTO_CONNECT     Auto-discover and connect to running Chrome
   AGENT_BROWSER_PIN_TAB          Pin the session to its bound tab (strict tab binding)
-  AGENT_BROWSER_ALLOW_FILE_ACCESS Allow file:// URLs to access local files
+  AGENT_BROWSER_ALLOW_FILE_ACCESS Let file:// pages load any local file
   AGENT_BROWSER_HIDE_SCROLLBARS  Hide scrollbars in headless Chromium screenshots (default: true)
   AGENT_BROWSER_COLOR_SCHEME     Color scheme preference (dark, light, no-preference)
   AGENT_BROWSER_DOWNLOAD_PATH    Default download directory for browser downloads
