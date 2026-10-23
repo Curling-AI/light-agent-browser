@@ -148,6 +148,14 @@ fn is_lightpanda_binary(path: &str) -> bool {
         .is_some_and(|name| name.to_ascii_lowercase().contains("lightpanda"))
 }
 
+/// Lightpanda serves one page per CDP connection, so a second tab fails with
+/// `TargetAlreadyLoaded`; say why, and what to do instead.
+pub fn second_page_error(engine: &str, open_pages: usize) -> Option<String> {
+    (engine.eq_ignore_ascii_case(DEFAULT_ENGINE) && open_pages >= 1).then(|| {
+        "Lightpanda opens one page per session, so it cannot open a second tab. Use `open <url>` to replace the page, a separate `--session` for a page in parallel, or `--engine chrome` for tabs.".to_string()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -298,5 +306,13 @@ mod tests {
             }),
             None
         );
+    }
+
+    #[test]
+    fn lightpanda_refuses_a_second_page() {
+        use super::second_page_error;
+        assert!(second_page_error("lightpanda", 1).is_some());
+        assert!(second_page_error("lightpanda", 0).is_none());
+        assert!(second_page_error("chrome", 3).is_none());
     }
 }

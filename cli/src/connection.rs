@@ -1055,7 +1055,54 @@ fn is_read_only(cmd: &Value) -> bool {
 }
 
 pub fn send_command(cmd: Value, session: &str) -> Result<Response, String> {
-    send_with_retry(is_read_only(&cmd), || send_command_once(&cmd, session))
+    // The daemon answers `close` before it exits, and keeps accepting
+    // connections meanwhile; a command sent in that window reaches the dying
+    // daemon and fails with EOF (#2134). Note the PID now, because the daemon
+    // removes its .pid file on exit, and wait for it after a successful close
+    // so the next command starts a fresh daemon.
+    let action = cmd
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let closing_pid = matches!(action, "close" | "confirm")
+        .then(|| daemon_pid(session))
+        .flatten();
+    let response = send_with_retry(is_read_only(&cmd), || send_command_once(&cmd, session))?;
+    if let Some(pid) = closing_pid {
+        if response_closed_daemon(&response) {
+            wait_for_pid_exit(pid, Duration::from_secs(5));
+        }
+    }
+    Ok(response)
+}
+
+fn daemon_pid(session: &str) -> Option<u32> {
+    fs::read_to_string(get_pid_path(session))
+        .ok()
+        .and_then(|pid| pid.trim().parse::<u32>().ok())
+}
+
+/// Mirrors the daemon's `close_completed_response`: a direct close, or a
+/// confirmed one whose result closed the browser.
+fn response_closed_daemon(response: &Response) -> bool {
+    fn data_closed(data: &Value) -> bool {
+        data.get("closed").and_then(|v| v.as_bool()) == Some(true)
+    }
+    response.success
+        && response.data.as_ref().is_some_and(|data| {
+            data_closed(data)
+                || data.get("result").is_some_and(|result| {
+                    result.get("success").and_then(|v| v.as_bool()) == Some(true)
+                        && result.get("data").is_some_and(data_closed)
+                })
+        })
+}
+
+fn wait_for_pid_exit(pid: u32, timeout: Duration) {
+    let start = Instant::now();
+    while is_pid_alive(pid) && start.elapsed() < timeout {
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Retry transient errors (EAGAIN/EWOULDBLOCK/connection issues). Once a
@@ -1215,6 +1262,53 @@ fn exchange<S: Read + Write>(mut stream: S, request: &[u8]) -> Result<Response, 
 mod tests {
     use super::*;
     use crate::test_utils::EnvGuard;
+
+    #[test]
+    fn close_responses_that_stop_the_daemon() {
+        let response = |success: bool, data: Value| Response {
+            success,
+            data: Some(data),
+            ..Default::default()
+        };
+        assert!(response_closed_daemon(&response(
+            true,
+            json!({ "closed": true })
+        )));
+        assert!(response_closed_daemon(&response(
+            true,
+            json!({ "result": { "success": true, "data": { "closed": true } } })
+        )));
+        // A close awaiting confirmation leaves the daemon running.
+        assert!(!response_closed_daemon(&response(
+            true,
+            json!({ "confirmationRequired": true })
+        )));
+        assert!(!response_closed_daemon(&response(
+            true,
+            json!({ "result": { "success": false, "data": { "closed": true } } })
+        )));
+        assert!(!response_closed_daemon(&response(
+            false,
+            json!({ "closed": true })
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_pid_exit_returns_once_the_process_is_gone() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("0.3")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let reaper = thread::spawn(move || child.wait());
+        let start = Instant::now();
+        wait_for_pid_exit(pid, Duration::from_secs(5));
+        let waited = start.elapsed();
+        reaper.join().unwrap().unwrap();
+        assert!(waited >= Duration::from_millis(200), "{waited:?}");
+        assert!(waited < Duration::from_secs(4), "{waited:?}");
+    }
 
     /// Repro for #2032: a daemon that reads the request and closes without
     /// replying must see the request once.

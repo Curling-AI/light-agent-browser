@@ -396,6 +396,8 @@ agent-browser tab close docs         # close by label
 
 Tabs opened through `tab new` or `click --new-tab` inherit the session's user agent, headers, HTTP credentials, init scripts, routes, and emulation overrides before their first document loads.
 
+Lightpanda opens one page per session, so with it `tab new` (and `click --new-tab`) fails with an error that says so. Use `open <url>` to replace the page, a separate `--session` for a page in parallel, or `--engine chrome` for tabs.
+
 `tab list --json` also reports each tab's CDP `targetId`, and target ids are accepted anywhere a tab ref is accepted (`tab <targetId>`, `tab close <targetId>`). Unlike `t<N>` ids, which are per-daemon counters, target ids stay stable across daemon restarts, so they're the right handle for scripts coordinating multiple sessions on one browser.
 
 Switching to a tab discarded by Chrome's Memory Saver reactivates it, since a discarded tab has no renderer to drive. Reactivation reloads the discarded page and resets its unsaved state, and the switch result reports `"revived": true`. A tab whose page is paused by a JavaScript dialog is alive rather than discarded, so the switch leaves it untouched and reports `"dialogBlocked": true`; resolve the dialog with `dialog accept` or `dialog dismiss` before interacting. Closing the active tab onto a discarded successor revives it the same way and reports `"activeTabRevived": true`.
