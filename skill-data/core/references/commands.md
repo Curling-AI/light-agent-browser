@@ -10,6 +10,8 @@ agent-browser open            # Launch browser (no navigation); stays on about:b
                               # `addinitscript` to stage state before the first navigation.
 agent-browser open <url>      # Launch + navigate (aliases: goto, navigate)
                               # Supports: https://, http://, file://, about:, data://
+                              # file:// on Lightpanda: served from disk, limited to the
+                              # opened folders (403 elsewhere); .pdf relaunches with Chrome
                               # Auto-prepends https:// if no protocol given
 agent-browser read [url]      # Fetch agent-readable text, or read rendered active-tab DOM
                               # Explicit URLs send Accept: text/markdown, then try .md if needed
@@ -476,6 +478,7 @@ agent-browser --screenshot-renderer <m> # Lightpanda screenshots: auto, chrome, 
 agent-browser --args "--a,--b=x,y"    # Launch args; commas inside a value are kept
 agent-browser --extension <path> ...  # Load browser extension (repeatable)
 agent-browser --ignore-https-errors   # Ignore SSL certificate errors
+agent-browser --allow-file-access     # file:// pages may load any local file (default: opened folders)
 agent-browser --ca-cert <path>        # Trust a CA for CLI requests, and in local Chromium on Linux (install --with-deps provides certutil)
 agent-browser --no-ca-cert            # Clear CA trust retained by the running session
 agent-browser --use-system-ca         # OS trust store for CLI requests (read, install, upgrade, doctor)

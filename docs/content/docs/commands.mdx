@@ -647,7 +647,7 @@ See [Init Scripts & Extensions](/init-scripts) for launch-time scripts, runtime 
 --ca-cert <path>         # Trust a CA for CLI requests, and for local Chromium on Linux
 --no-ca-cert             # Clear CA trust retained by the running session
 --use-system-ca          # Use the OS trust store for CLI requests (read, install, upgrade, doctor)
---allow-file-access      # Allow file:// URLs to access local files (Chromium only)
+--allow-file-access      # Let file:// pages load any local file (Lightpanda: lifts the opened-folder limit)
 --hide-scrollbars <bool> # Hide native scrollbars in headless Chromium screenshots
 -p, --provider <name>    # Browser provider or configured provider plugin
 --device <name>          # iOS device name (e.g., "iPhone 15 Pro")
@@ -794,6 +794,6 @@ agent-browser --allow-file-access open file:///path/to/page.html
 agent-browser screenshot output.png
 ```
 
-The `--allow-file-access` flag enables JavaScript to access other local files. Chromium only.
+With Chrome, the `--allow-file-access` flag enables JavaScript to access other local files. With Lightpanda, `file://` pages open without it and can load files from the folders the session opened; the flag lifts that limit, and a local `.pdf` relaunches the session with Chrome. See [Lightpanda local files](/engines/lightpanda#local-files).
 
 See [Files & Clipboard](/files) for local files, uploads, downloads, screenshots, PDFs, and clipboard workflows.

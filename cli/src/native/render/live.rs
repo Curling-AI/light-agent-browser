@@ -23,7 +23,7 @@ use crate::native::element::resolve_element_object_id;
 const LIVE_PROBE_JS: &str = r#"(() => {
   const loc = window.location;
   let local = null;
-  if (loc.protocol === 'file:') {
+  if (loc.protocol === 'file:' || loc.hostname === 'file.agent-browser.invalid') {
     local = 'local-file';
   } else {
     const host = (loc.hostname || '').replace(/^\[|\]$/g, '');

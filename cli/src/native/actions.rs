@@ -731,6 +731,8 @@ pub struct DaemonState {
     pub engine_is_default: bool,
     /// Set right before an implicit relaunch that has to use Chrome.
     force_chrome: bool,
+    /// Folders whose `file://` pages Lightpanda may load (see `file_url`).
+    pub file_urls: super::file_url::FileUrls,
     /// One-shot warning attached to the response of the current command
     /// (e.g. the default engine fell back to Chrome, or a capture could not
     /// go live).
@@ -863,6 +865,7 @@ impl DaemonState {
             pending_launch_warning: None,
             engine_is_default: false,
             force_chrome: false,
+            file_urls: super::file_url::FileUrls::default(),
             screenshot_renderer: super::render::ScreenshotRenderer::default(),
             // README documents 25s, intentionally below the CLI's 30s IPC
             // read timeout so the daemon reports a proper timeout error
@@ -959,6 +962,7 @@ impl DaemonState {
         let blocked_documents = self.blocked_documents.clone();
         let proxy_credentials = self.proxy_credentials.clone();
         let capture_session = self.recording_state.capture_session.clone();
+        let file_urls = self.file_urls.clone();
 
         self.fetch_handler_task = Some(tokio::spawn(async move {
             loop {
@@ -1121,6 +1125,13 @@ impl DaemonState {
                             session_id: sid,
                             request_headers,
                         };
+
+                        if file_urls
+                            .serve(&client, &paused.session_id, &paused.request_id, &paused.url)
+                            .await
+                        {
+                            continue;
+                        }
 
                         let df = domain_filter.read().await;
                         let rt = routes.read().await;
@@ -3343,6 +3354,11 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
         None
     };
 
+    // A Lightpanda `file://` page reports the reserved host; show the file.
+    let result = result.map(|mut data| {
+        super::file_url::display_urls_in(&mut data);
+        data
+    });
     let mut resp = match result {
         Ok(data) => success_response(&id, data),
         Err(e) => error_response(&id, &super::browser::to_ai_friendly_error(&e)),
@@ -4054,6 +4070,7 @@ async fn session_setup_pending(state: &DaemonState) -> bool {
     !state.session_setup.is_empty()
         || !state.routes.read().await.is_empty()
         || !state.origin_headers.read().await.is_empty()
+        || state.file_urls.is_active()
 }
 
 /// Replay the session-scoped setup the user configured on the active page
@@ -4173,7 +4190,7 @@ async fn apply_session_setup(state: &mut DaemonState, session_id: &str) -> Resul
     // Fetch.enable; this covers the case where neither is active.
     let has_routes = !state.routes.read().await.is_empty();
     let has_origin_headers = !state.origin_headers.read().await.is_empty();
-    if has_routes || has_origin_headers {
+    if has_routes || has_origin_headers || state.file_urls.is_active() {
         let patterns = build_fetch_patterns(state).await;
         let params = build_fetch_enable_params(state, patterns).await;
         client
@@ -4438,6 +4455,7 @@ async fn auto_launch_inner(
     let engine_choice = super::engine::resolve_launch_engine(engine.as_deref(), &options);
     state.pending_launch_warning = engine_choice.warning();
     state.engine_is_default = super::engine::is_unset(engine.as_deref());
+    state.file_urls.set_allow_any(options.allow_file_access);
     let engine = Some(engine_choice.engine);
     state.engine = engine.clone().unwrap_or_default();
     write_engine_file(&state.session_id, &state.engine);
@@ -5231,6 +5249,9 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
         let choice = super::engine::resolve_launch_engine(engine.as_deref(), &launch_options);
         launch_warning = choice.warning();
         state.engine_is_default = super::engine::is_unset(engine.as_deref());
+        state
+            .file_urls
+            .set_allow_any(launch_options.allow_file_access);
         Some(choice.engine)
     } else {
         engine
@@ -5626,10 +5647,7 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
 
     if let Some(reason) = super::engine::chrome_required_for_url(&state.engine, url) {
         if !state.engine_is_default {
-            return Err(format!(
-                "{}. Use --engine chrome for this session, or serve the file over HTTP (for example `python3 -m http.server`).",
-                reason
-            ));
+            return Err(format!("{}. Use --engine chrome for this session.", reason));
         }
         state.force_chrome = true;
         auto_launch(state, plugins_from_command_or_env(cmd)).await?;
@@ -5639,6 +5657,13 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
             reason
         ));
     }
+
+    let file_page = if super::file_url::is_file_url(url) && state.engine == "lightpanda" {
+        Some(open_file_url_on_lightpanda(state, url).await?)
+    } else {
+        None
+    };
+    let url = file_page.as_deref().unwrap_or(url);
 
     let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
 
@@ -5691,6 +5716,23 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
     }
 
     navigate_active_page(state, url, wait_until).await
+}
+
+/// Lightpanda cannot load `file://`: allows the file's folder, intercepts the
+/// reserved host on the active page, and returns the URL to navigate to.
+async fn open_file_url_on_lightpanda(state: &DaemonState, url: &str) -> Result<String, String> {
+    if state.domain_filter.read().await.is_some() {
+        return Err("file:// URLs cannot be opened while --allowed-domains is set".to_string());
+    }
+    let reserved = state.file_urls.mount(url)?;
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+    let session_id = mgr.active_session_id()?.to_string();
+    let patterns = build_fetch_patterns(state).await;
+    let params = build_fetch_enable_params(state, patterns).await;
+    mgr.client
+        .send_command("Fetch.enable", Some(params), Some(&session_id))
+        .await?;
+    Ok(reserved)
 }
 
 /// Navigate the active page and drop element refs and frame scope. Every
@@ -5914,6 +5956,7 @@ async fn handle_close(state: &mut DaemonState) -> Result<Value, String> {
     let save_result = auto_save_restore_state(state).await;
     close_all_browser_backends(state).await?;
     state.screenshot_renderer.shutdown().await;
+    state.file_urls.clear();
     state.attached_target = None;
 
     // Stop background Fetch handler
@@ -6361,6 +6404,7 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
                 engine: &state.engine,
                 domain_filter_active: state.domain_filter.read().await.is_some(),
                 renderer_token: super::render::renderer_token_from_command(cmd),
+                file_urls: &state.file_urls,
             },
             &options,
             &renderer_mode,
@@ -7810,6 +7854,19 @@ async fn handle_tab_new(cmd: &Value, state: &mut DaemonState) -> Result<Value, S
         }
     }
     let url = cmd.get("url").and_then(|v| v.as_str());
+    // apply_session_setup enables interception of the reserved host on the new tab.
+    let file_page = match url {
+        Some(u) if super::file_url::is_file_url(u) && state.engine == "lightpanda" => {
+            if state.domain_filter.read().await.is_some() {
+                return Err(
+                    "file:// URLs cannot be opened while --allowed-domains is set".to_string(),
+                );
+            }
+            Some(state.file_urls.mount(u)?)
+        }
+        _ => None,
+    };
+    let url = file_page.as_deref().or(url);
     let label = cmd.get("label").and_then(|v| v.as_str());
     let domain_filter = state.domain_filter.read().await.clone();
     let has_proxy_creds = state.proxy_credentials.read().await.is_some();
@@ -8413,6 +8470,7 @@ async fn handle_pdf(cmd: &Value, state: &mut DaemonState) -> Result<Value, Strin
             engine: &state.engine,
             domain_filter_active: state.domain_filter.read().await.is_some(),
             renderer_token: super::render::renderer_token_from_command(cmd),
+            file_urls: &state.file_urls,
         },
         params,
         &super::render::RendererMode::from_command(cmd)?,
@@ -11478,6 +11536,7 @@ async fn handle_diff_screenshot(cmd: &Value, state: &DaemonState) -> Result<Valu
             engine: &state.engine,
             domain_filter_active: state.domain_filter.read().await.is_some(),
             renderer_token: super::render::renderer_token_from_command(cmd),
+            file_urls: &state.file_urls,
         },
         &options,
         &super::render::RendererMode::from_command(cmd)?,
@@ -12250,6 +12309,9 @@ async fn build_fetch_patterns(state: &DaemonState) -> Vec<Value> {
         .iter()
         .map(|r| json!({ "urlPattern": collapse_wildcards(&r.url_pattern) }))
         .collect();
+    if state.file_urls.is_active() {
+        patterns.push(super::file_url::fetch_pattern());
+    }
     let has_domain_filter = state.domain_filter.read().await.is_some();
     let has_origin_headers = !state.origin_headers.read().await.is_empty();
     let has_proxy_creds = state.proxy_credentials.read().await.is_some();

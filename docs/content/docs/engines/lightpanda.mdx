@@ -105,8 +105,8 @@ When you pass `--engine` (or set `AGENT_BROWSER_ENGINE` or `engine` in config), 
     <tr><td>Unsupported platform</td><td>The platform has no Lightpanda build (Windows)</td></tr>
     <tr><td>Not installed</td><td>Lightpanda was not found. Run <code>agent-browser install</code> to download it</td></tr>
     <tr><td>Non-Lightpanda executable</td><td><code>--executable-path</code> points at a binary whose file name does not contain <code>lightpanda</code></td></tr>
-    <tr><td>Chrome-only option</td><td>One of <code>--headed</code>, <code>--profile</code>, <code>--extension</code>, <code>--state</code>, <code>--allow-file-access</code>, <code>--webgpu</code>, <code>--ca-cert</code>, or <code>--args</code> is set</td></tr>
-    <tr><td><code>file://</code> URL</td><td>Lightpanda cannot open local files. Navigating to one relaunches the session with Chrome; with an explicit <code>--engine lightpanda</code> the navigation fails with a hint instead</td></tr>
+    <tr><td>Chrome-only option</td><td>One of <code>--headed</code>, <code>--profile</code>, <code>--extension</code>, <code>--state</code>, <code>--webgpu</code>, <code>--ca-cert</code>, or <code>--args</code> is set</td></tr>
+    <tr><td>Local PDF</td><td>Lightpanda has no PDF viewer. Opening a <code>file://</code> URL ending in <code>.pdf</code> relaunches the session with Chrome; with an explicit <code>--engine lightpanda</code> the navigation fails with a hint instead. Other local files open in Lightpanda (see <a href="#local-files">Local files</a>)</td></tr>
   </tbody>
 </table>
 
@@ -128,6 +128,21 @@ agent-browser --engine lightpanda --executable-path /path/to/lightpanda open exa
 
 Without `--engine lightpanda`, the binary's file name must contain `lightpanda`. Otherwise agent-browser treats the path as a Chrome executable.
 
+## Local files
+
+Lightpanda only speaks http(s), so agent-browser serves `file://` pages to it:
+
+```bash
+agent-browser open file:///path/to/page.html
+agent-browser get url        # file:///path/to/page.html
+```
+
+The daemon navigates Lightpanda to `http://file.agent-browser.invalid/path/to/page.html` and answers that host from disk through CDP `Fetch`, including the page's scripts, stylesheets, images, and links. Folders open as a listing. The `.invalid` host never resolves, so nothing leaves the machine. `open`, `get url`, `back`, and `tab list` show the `file://` URL; scripts in the page see the http one, so `location.protocol` is `http:`.
+
+Every served file shares that one origin, so a page could `fetch()` any file the host serves. Requests are limited to the folders of the files the session opened, and their subfolders, after resolving `..` and symlinks. Anything else gets a 403. Pass `--allow-file-access` to lift the limit. The folders are forgotten on `close`. File pages cannot be opened while `--allowed-domains` is set.
+
+Screenshots and PDFs of a local page use the same folders: the local renderer reads the page's stylesheets and images from disk, and a remote renderer, which cannot reach them, triggers a [live capture](#live-captures) that opens the `file://` URL in a local Chrome.
+
 ## Differences from Chrome
 
 Lightpanda is a purpose-built headless engine. Some Chrome-specific features are not available:
@@ -140,7 +155,8 @@ Lightpanda is a purpose-built headless engine. Some Chrome-specific features are
     <tr><td>Extensions (<code>--extension</code>)</td><td>Not supported</td></tr>
     <tr><td>Persistent profiles (<code>--profile</code>)</td><td>Not supported</td></tr>
     <tr><td>Storage state (<code>--state</code>)</td><td>Not supported</td></tr>
-    <tr><td>File access (<code>--allow-file-access</code>)</td><td>Not supported</td></tr>
+    <tr><td>File access (<code>--allow-file-access</code>)</td><td>Supported; lifts the opened-folder limit for <code>file://</code> pages (see <a href="#local-files">Local files</a>)</td></tr>
+    <tr><td>PDF viewer</td><td>Not supported; a local <code>.pdf</code> opens in Chrome</td></tr>
     <tr><td>Headed mode (<code>--headed</code>)</td><td>Not applicable (headless only)</td></tr>
     <tr><td>WebGPU (<code>--webgpu</code>)</td><td>Not supported</td></tr>
     <tr><td>CA certificates (<code>--ca-cert</code>)</td><td>Not supported</td></tr>
@@ -224,7 +240,7 @@ The renderer (local or remote) fetches subresources such as stylesheets, images,
 
 ### Live captures
 
-Pages a serialized render cannot reproduce are captured live instead: when the page has a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts), and, with a remote renderer only, when it is served from `file://`, loopback, or a private address (which a shared renderer cannot reach and refuses), a short-lived local Chrome opens the page with the session cookies, lets its scripts run, captures, and exits. `--json` then reports `"renderer": "chrome-live"` and `rendererReason` (`canvas`, `layout-chart`, `local-file`, or `local-server`). The live capture reloads the URL, so state that only exists after interactions is lost, and it is skipped with `--annotate`, with `--screenshot-renderer native`, and while `--allowed-domains` is active. A local renderer reaches local pages itself and paints the session's DOM, keeping typed values. When a live capture is needed but no Chrome is installed, the configured renderer captures what it can and the command warns (`rendererWarning` in `--json`). A shared renderer never captures live: the flag that requests it never crosses the wire.
+Pages a serialized render cannot reproduce are captured live instead: when the page has a visible `<canvas>` (Chart.js, ECharts) or a chart that measures its own SVG (ApexCharts, Google Charts), and, with a remote renderer only, when it is served from `file://`, loopback, or a private address (which a shared renderer cannot reach and refuses), a short-lived local Chrome opens the page with the session cookies, lets its scripts run, captures, and exits. `--json` then reports `"renderer": "chrome-live"` and `rendererReason` (`canvas`, `layout-chart`, `local-file`, or `local-server`). The live capture reloads the URL, so state that only exists after interactions is lost, and it is skipped with `--annotate`, with `--screenshot-renderer native`, and while `--allowed-domains` is active. A local renderer reaches local pages itself and paints the session's DOM, keeping typed values; for a `file://` page it reads the page's stylesheets and images from the allowed folders. When a live capture is needed but no Chrome is installed, the configured renderer captures what it can and the command warns (`rendererWarning` in `--json`). A shared renderer never captures live: the flag that requests it never crosses the wire.
 
 ### Limitations
 

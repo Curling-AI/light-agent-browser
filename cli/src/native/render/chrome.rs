@@ -177,6 +177,7 @@ impl ChromeRenderer {
             policy: self.policy,
             main_document: (!request.live && is_http_url(&request.url))
                 .then(|| base64::engine::general_purpose::STANDARD.encode(request.html.as_bytes())),
+            local_files: request.local_files.clone(),
         };
         let gate_task = tokio::spawn(gate.run(raw_events, forward));
         let result = self.render_page(&session_id, &mut events, request).await;
@@ -342,7 +343,8 @@ impl ChromeRenderer {
     ) -> Result<(), String> {
         let client = &self.client;
         let sid = Some(session_id);
-        self.enable_request_gate(session_id, true).await?;
+        self.enable_request_gate(session_id, true, request.local_files.is_some())
+            .await?;
 
         let deadline = Instant::now() + timeout;
         let navigate =
@@ -422,11 +424,24 @@ impl ChromeRenderer {
     /// [`RenderPolicy::public_network_only`]. Interception stays on for the
     /// whole render, so resources requested after the load event are checked
     /// too.
-    async fn enable_request_gate(&self, session_id: &str, serve_main: bool) -> Result<(), String> {
+    async fn enable_request_gate(
+        &self,
+        session_id: &str,
+        serve_main: bool,
+        local_files: bool,
+    ) -> Result<(), String> {
         let patterns = if self.policy.public_network_only {
             json!([{ "urlPattern": "*", "requestStage": "Request" }])
         } else if serve_main {
-            json!([{ "urlPattern": "*", "resourceType": "Document", "requestStage": "Request" }])
+            let mut patterns = vec![
+                json!({ "urlPattern": "*", "resourceType": "Document", "requestStage": "Request" }),
+            ];
+            if local_files {
+                let mut files = crate::native::file_url::fetch_pattern();
+                files["requestStage"] = json!("Request");
+                patterns.push(files);
+            }
+            json!(patterns)
         } else {
             return Ok(());
         };
@@ -460,7 +475,7 @@ impl ChromeRenderer {
             .and_then(|f| f.get("id"))
             .and_then(|v| v.as_str())
             .ok_or("Renderer page has no main frame")?;
-        self.enable_request_gate(session_id, false).await?;
+        self.enable_request_gate(session_id, false, false).await?;
         client
             .send_command(
                 "Page.setDocumentContent",
@@ -499,6 +514,8 @@ struct RequestGate {
     /// Base64 body served for the first document request, when the page is
     /// rendered at its original URL.
     main_document: Option<String>,
+    /// Answers a `file://` page's subresources from disk.
+    local_files: Option<crate::native::file_url::FileUrls>,
 }
 
 impl RequestGate {
@@ -520,9 +537,22 @@ impl RequestGate {
             let client = self.client.clone();
             let session_id = self.session_id.clone();
             let policy = self.policy;
+            let local_files = self.local_files.clone();
             // Checks resolve DNS; answering them concurrently keeps a page
             // with many subresources from loading them one at a time.
             tokio::spawn(async move {
+                if let Some(files) = local_files {
+                    let request_id = event.params.get("requestId").and_then(|v| v.as_str());
+                    let url = event
+                        .params
+                        .pointer("/request/url")
+                        .and_then(|v| v.as_str());
+                    if let (Some(request_id), Some(url)) = (request_id, url) {
+                        if files.serve(&client, &session_id, request_id, url).await {
+                            return;
+                        }
+                    }
+                }
                 answer_paused(&client, &session_id, policy, &event.params).await;
             });
         }

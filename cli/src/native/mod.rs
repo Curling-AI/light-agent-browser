@@ -19,6 +19,8 @@ pub mod element;
 #[allow(dead_code)]
 pub mod engine;
 #[allow(dead_code)]
+pub mod file_url;
+#[allow(dead_code)]
 pub mod inspect_server;
 #[allow(dead_code)]
 pub mod interaction;
