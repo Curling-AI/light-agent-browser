@@ -95,7 +95,7 @@ agent-browser screenshot page.png
 agent-browser close
 ```
 
-Clicks fail early when another element covers the target's click point, for example a consent banner or modal. Dismiss or interact with the reported covering element, then take a fresh snapshot before retrying the original ref.
+Clicks fail early when another element covers the target's click point, for example a consent banner or modal. Dismiss or interact with the reported covering element, then take a fresh snapshot before retrying the original ref. Click and dblclick fail, instead of reporting success, when the element is hidden, disabled, or outside the viewport. `click --new-tab` opens the link's URL directly, so these checks do not apply to it.
 
 Headless Chromium screenshots hide native scrollbars for consistent image output. Pass `--hide-scrollbars false` when launching to keep native scrollbars visible.
 
@@ -590,7 +590,7 @@ agent-browser mcp --tools all
 agent-browser mcp --tools core,network,react
 ```
 
-Starts a Model Context Protocol server over stdio. MCP clients launch this command as a subprocess and exchange newline-delimited JSON-RPC on stdin and stdout. The server defaults to MCP protocol 2025-11-25 and accepts older supported client protocol versions during initialization.
+Starts a Model Context Protocol server over stdio. MCP clients launch this command as a subprocess and exchange newline-delimited JSON-RPC on stdin and stdout. The server defaults to MCP protocol 2025-11-25 and accepts older supported client protocol versions during initialization. A tool call with an argument its schema does not declare fails with an invalid-params error that names the unknown keys and lists the tool's own arguments.
 
 The default tools profile is `core`, which keeps MCP context small for everyday browser automation. Use `--tools all` for the full typed CLI parity surface, or combine profiles with commas, such as `--tools core,network,react`.
 
@@ -875,7 +875,7 @@ agent-browser includes security features for safe AI agent deployments. All feat
 - **Plugin System**: Extend agent-browser with external executable plugins. Plugins run out-of-process over the `agent-browser.plugin.v1` stdio JSON protocol and declare capabilities such as `credential.read`, `browser.provider`, `launch.mutate`, or `command.run`.
 - **Content Boundary Markers**: Wrap page output in delimiters so LLMs can distinguish tool output from untrusted content: `--content-boundaries`
 - **Domain Allowlist**: Restrict navigation to trusted domains (wildcards like `*.example.com` also match the bare domain): `--allowed-domains "example.com,*.example.com"`. Sub-resource requests (scripts, images, fetch), WebSocket/EventSource connections, and `sendBeacon` calls to non-allowed domains are blocked. WebRTC peer connections are disabled in supported Chromium sessions while the allowlist is active to prevent STUN, TURN, and DNS traffic from bypassing HTTP interception. Dedicated and shared workers are guarded with a bootstrap wrapper; if a page CSP forbids that wrapper, the worker fails closed rather than running without the allowlist guard. Pre-existing CDP sessions, auto-connect, Chrome profiles, direct-page provider plugins, agent-browser restore or state-file replay, raw Chrome args that select profiles, restore sessions, or open startup pages, iOS, and Safari reject this option because agent-browser cannot install equivalent containment before page scripts run. Include any CDN domains your target pages depend on (e.g., `*.cdn.example.com`).
-- **Action Policy**: Gate destructive actions with a static policy file: `--action-policy ./policy.json`
+- **Action Policy**: Gate destructive actions with a static policy file: `--action-policy ./policy.json`; a missing or invalid file blocks every command except `close`
 - **Action Confirmation**: Require explicit approval for sensitive action categories: `--confirm-actions eval,download`
 - **Output Length Limits**: Prevent context flooding: `--max-output 50000`
 
@@ -1134,7 +1134,7 @@ docker run --rm -p 9300:9300 -e AGENT_BROWSER_RENDERER_TOKEN=change-me agent-bro
 | `--extension <path>` | Load browser extension (repeatable; or `AGENT_BROWSER_EXTENSIONS` env) |
 | `--init-script <path>` | Register a page init script before the first navigation (repeatable; or `AGENT_BROWSER_INIT_SCRIPTS` env) |
 | `--enable <feature>` | Built-in init scripts: `react-devtools` (repeatable or comma-list; or `AGENT_BROWSER_ENABLE` env) |
-| `--args <args>` | Browser launch args, comma or newline separated (or `AGENT_BROWSER_ARGS` env) |
+| `--args <args>` | Browser launch args, newline separated, or comma separated before another flag. Commas inside a value such as `--disable-features=A,B` are kept (or `AGENT_BROWSER_ARGS` env) |
 | `--user-agent <ua>` | Custom User-Agent string (or `AGENT_BROWSER_USER_AGENT` env) |
 | `--proxy <url>` | Proxy server URL with optional auth (or `AGENT_BROWSER_PROXY` env) |
 | `--proxy-bypass <hosts>` | Hosts to bypass proxy (or `AGENT_BROWSER_PROXY_BYPASS` env) |
@@ -1359,6 +1359,8 @@ agent-browser hover @e4                   # Hover the link
 ```
 
 When a ref click is blocked by an overlay, the error includes the covering element, such as `covered by <div#consent-banner>`. Click the banner or dialog control first, then run `snapshot` again before reusing refs.
+
+If a ref's element was replaced, agent-browser uses the one element with the same role and name. When duplicates make that ambiguous, the action fails without acting. Run `snapshot` again and use a fresh ref.
 
 **Why use refs?**
 
@@ -1621,6 +1623,8 @@ agent-browser --cdp 9222 snapshot
 # Connect to remote browser via WebSocket URL
 agent-browser --cdp "wss://your-browser-service.com/cdp?token=..." snapshot
 ```
+
+The session stays attached until `agent-browser close`. Later commands without a connection flag run against the same browser, as if you passed `--cdp` again. If that browser goes away, commands fail instead of launching a local one.
 
 The `--cdp` flag accepts either:
 
