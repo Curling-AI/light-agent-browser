@@ -5019,7 +5019,8 @@ async fn handle_launch_with_deadline(
 ) -> Result<Value, String> {
     let resolved = resolve_launch_target(cmd, state.attached_target.as_ref());
     let cmd = resolved.as_ref().unwrap_or(cmd);
-    let result = handle_launch_for_target(cmd, state, deadline).await;
+    // Boxed: with the fork's engine hooks the launch future overflows a 2 MB stack in debug builds.
+    let result = Box::pin(handle_launch_for_target(cmd, state, deadline)).await;
     if result.is_ok() {
         state.attached_target = AttachedTarget::from_launch_command(cmd);
     }

@@ -20,7 +20,7 @@ New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 Upstream files carry small, self-contained hooks:
 
-- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `engine_is_default`/`force_chrome` state and the `file://` relaunch in `handle_navigate`, `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`
+- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `engine_is_default`/`force_chrome` state and the `file://` relaunch in `handle_navigate`, `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
 - `cli/src/native/mod.rs`: module registration
 - `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior). Upstream's `subscribe_methods` (#2110) does not replace it: its lossless taps only see broadcast events, and a private session's events never reach the broadcast
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
