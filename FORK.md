@@ -33,7 +33,7 @@ Upstream files carry small, self-contained hooks:
 - `cli/src/connection.rs`: `send_command` waits for the daemon to exit after a successful `close`, so the next command starts a fresh daemon (upstream #2134; drop this hook once upstream fixes it)
 - `cli/src/main.rs`: `renderer` command, install flags, launch warning printed on stderr
 - `cli/src/output.rs`: response warnings printed for every action, help text
-- `cli/src/flags.rs`, `cli/src/commands.rs`, `cli/src/mcp.rs`, `agent-browser.schema.json`: `--screenshot-renderer` plumbing, per-command `rendererToken` forwarding, and MCP parity
+- `cli/src/flags.rs`, `cli/src/commands.rs`, `cli/src/mcp.rs`, `agent-browser.schema.json`: `--screenshot-renderer` plumbing, per-command `rendererToken` forwarding, and MCP parity; the MCP tools' `renderer` argument rejects renderer URLs (`mcp_renderer`), which, like the network flags upstream rejects in `extraArgs` (#2181), only the server's environment or config may set
 - `cli/src/native/actions.rs` also strips `rendererToken` from dashboard command broadcasts
 - `cli/tests/tls_cli.rs`: the Chrome manifest trust test runs `--engine chrome install`
 - `scripts/postinstall.js`: install reminder mentions Lightpanda
