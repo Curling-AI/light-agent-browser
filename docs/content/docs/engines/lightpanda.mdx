@@ -340,7 +340,7 @@ For Kubernetes, start from `docker/renderer/kubernetes.yaml`.
 
 ### MCP
 
-The `agent_browser_screenshot` and `agent_browser_diff_screenshot` MCP tools accept a `renderer` argument with the same values as `--screenshot-renderer`. `renderer serve` is a long-running service, so it is intentionally not exposed as an MCP tool.
+The `agent_browser_screenshot`, `agent_browser_pdf`, and `agent_browser_diff_screenshot` MCP tools accept a `renderer` argument: `auto`, `chrome`, or `native`. A renderer service URL receives the page's DOM and cookies, so MCP callers cannot pass one; set it on the server with `AGENT_BROWSER_SCREENSHOT_RENDERER` or `screenshotRenderer` in config. `renderer serve` is a long-running service, so it is intentionally not exposed as an MCP tool.
 
 ## When to Use Lightpanda
 
