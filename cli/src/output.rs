@@ -1736,6 +1736,10 @@ XPath, or an element reference from snapshot (e.g., @e1).
 If another element covers the click point, agent-browser reports the
 covering element instead of dispatching a click to the wrong target.
 
+Click and dblclick fail, instead of reporting success, when the element
+is hidden, disabled, or outside the viewport. With --new-tab, click opens
+the link's URL directly, so these checks do not apply.
+
 Options:
   --new-tab            Open link in a new tab instead of navigating current tab.
                        The new tab inherits session setup before its first load.
@@ -1764,6 +1768,9 @@ Usage: agent-browser dblclick <selector>
 
 Double-clicks on the specified element. Useful for text selection
 or triggering double-click handlers.
+
+Double-click fails, instead of reporting success, when the element is
+hidden, disabled, or outside the viewport.
 
 Global Options:
   --json               Output as JSON
@@ -2259,6 +2266,8 @@ Usage: agent-browser snapshot [options]
 Returns an accessibility tree representation of the page with element
 references (like @e1, @e2) that can be used in subsequent commands.
 Refs can be reused across snapshots. Take a fresh snapshot after navigation.
+If a ref's element was replaced, the action uses the one element with the same
+role and name. If that is ambiguous, it fails: run snapshot again.
 
 Options:
   -i, --interactive    Only include interactive elements
@@ -4119,8 +4128,9 @@ Options:
                              (or AGENT_BROWSER_INIT_SCRIPTS env, comma-separated)
   --enable <feature>         Built-in init scripts: react-devtools (repeatable or comma-separated)
                              (or AGENT_BROWSER_ENABLE env)
-  --args <args>              Browser launch args, comma or newline separated (or AGENT_BROWSER_ARGS)
-                             e.g., --args "--no-sandbox,--disable-blink-features=AutomationControlled"
+  --args <args>              Browser launch args, newline separated, or comma separated before another flag
+                             (or AGENT_BROWSER_ARGS). Commas inside a value are kept.
+                             e.g., --args "--no-sandbox,--disable-features=Translate,HttpsUpgrades"
   --user-agent <ua>          Custom User-Agent (or AGENT_BROWSER_USER_AGENT)
   --proxy <server>           Proxy server URL (or AGENT_BROWSER_PROXY, HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
                              Supports authenticated proxies: --proxy "http://user:pass@127.0.0.1:7890"
