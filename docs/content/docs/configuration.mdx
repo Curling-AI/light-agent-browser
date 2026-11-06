@@ -319,6 +319,7 @@ These environment variables configure additional daemon and runtime behavior:
     <tr><td><code>AGENT_BROWSER_HEADED</code></td><td>Show browser window instead of running headless (<code>1</code> to enable).</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_WEBGPU</code></td><td>Enable WebGPU; SwiftShader software Vulkan on Linux, no GPU required (<code>1</code> to enable).</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_NO_XVFB</code></td><td>Disable automatic Xvfb virtual display for headed mode on displayless Linux hosts (<code>1</code> to disable).</td><td>(auto-Xvfb enabled)</td></tr>
+    <tr><td><code>AGENT_BROWSER_COHERENT_CHROME</code></td><td>Launch Chrome without the headless markers: the <code>HeadlessChrome</code> User-Agent, <code>navigator.webdriver</code> and the 800x600 screen (<code>1</code> to enable). Read by the daemon, so it never relaunches a running browser. An explicit <code>--user-agent</code> or window size still wins.</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_CLEAR_CA_CERT</code></td><td>Clear CA trust retained by the running browser session.</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_USE_SYSTEM_CA</code></td><td>Use the operating system trust store for the CLI's own HTTPS requests (<code>1</code> to enable).</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_JSON</code></td><td>Use JSON output by default.</td><td>(disabled)</td></tr>
