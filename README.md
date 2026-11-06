@@ -1461,7 +1461,9 @@ On Linux hosts with no display (servers, containers), `--headed` still works: wh
 
 ## Coherent Chrome
 
-`AGENT_BROWSER_COHERENT_CHROME=1` launches Chrome without the headless markers: the `HeadlessChrome` User-Agent, `navigator.webdriver` and the 800x600 screen. The daemon reads it from its environment, so it never relaunches a running browser. An explicit `--user-agent` or window size still wins.
+`AGENT_BROWSER_COHERENT_CHROME=1` launches Chrome without the headless markers: `navigator.webdriver`, the 800x600 screen and, on headless Linux only, the `HeadlessChrome` User-Agent. The daemon reads it from its environment, so it never relaunches a running browser. An explicit `--user-agent` or `--screen-info` still wins, and the screen follows an explicit window size.
+
+It only changes how Chrome launches and does not select Chrome: a session on Lightpanda stays there until it moves to Chrome.
 
 ## WebGPU
 

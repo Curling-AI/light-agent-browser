@@ -144,7 +144,7 @@ const VERSION_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// leaves a process tree whose inherited stdout handle never closes, so the
 /// caller would wait forever.
 #[cfg(windows)]
-fn query_chrome_version(path: &Path) -> Option<String> {
+pub(crate) fn query_chrome_version(path: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::Storage::FileSystem::{
@@ -205,7 +205,7 @@ fn query_chrome_version(path: &Path) -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn query_chrome_version(path: &Path) -> Option<String> {
+pub(crate) fn query_chrome_version(path: &Path) -> Option<String> {
     let mut cmd = std::process::Command::new(path);
     cmd.arg("--version");
     run_version_command(cmd, VERSION_QUERY_TIMEOUT)

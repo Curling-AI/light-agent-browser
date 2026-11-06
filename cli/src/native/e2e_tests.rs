@@ -1096,28 +1096,7 @@ async fn e2e_coherent_chrome_never_requests_as_headless() {
     let env = EnvGuard::new(&["AGENT_BROWSER_COHERENT_CHROME"]);
     env.set("AGENT_BROWSER_COHERENT_CHROME", "1");
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let requests = Arc::new(Mutex::new(Vec::new()));
-    let recorded = requests.clone();
-    tokio::spawn(async move {
-        while let Ok((mut stream, _)) = listener.accept().await {
-            let recorded = recorded.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 4096];
-                let n = stream.read(&mut buf).await.unwrap_or(0);
-                if n > 0 {
-                    recorded
-                        .lock()
-                        .unwrap()
-                        .push(String::from_utf8_lossy(&buf[..n]).to_string());
-                }
-                let _ = stream
-                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-                    .await;
-            });
-        }
-    });
+    let (port, requests) = spawn_request_recorder(|request| Some(request.to_string())).await;
 
     let mut state = DaemonState::new();
     let url = format!("http://127.0.0.1:{port}/");
@@ -1148,7 +1127,7 @@ async fn e2e_coherent_chrome_never_requests_as_headless() {
             .lock()
             .unwrap()
             .iter()
-            .any(|r: &String| r.starts_with("GET /popup "));
+            .any(|r| r.starts_with("GET /popup "));
         if loaded {
             break;
         }
@@ -1172,6 +1151,18 @@ async fn e2e_coherent_chrome_never_requests_as_headless() {
 
 /// Records the paths a renderer requested from a loopback server.
 async fn spawn_hit_recorder() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    // Speculative preconnects open and close without a request.
+    spawn_request_recorder(|request| {
+        let line = request.lines().next()?;
+        line.split_whitespace().nth(1).map(str::to_string)
+    })
+    .await
+}
+
+/// Records what `record` keeps of each request a loopback server received.
+async fn spawn_request_recorder(
+    record: fn(&str) -> Option<String>,
+) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -1183,16 +1174,12 @@ async fn spawn_hit_recorder() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<Strin
             // One task per connection: an idle preconnect must not hold up
             // the requests behind it.
             tokio::spawn(async move {
-                let mut buf = [0u8; 2048];
+                let mut buf = [0u8; 4096];
                 let n = stream.read(&mut buf).await.unwrap_or(0);
-                let line = String::from_utf8_lossy(&buf[..n])
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .to_string();
-                // Speculative preconnects open and close without a request.
-                if let Some(path) = line.split_whitespace().nth(1) {
-                    recorded.lock().unwrap().push(path.to_string());
+                if n > 0 {
+                    if let Some(kept) = record(&String::from_utf8_lossy(&buf[..n])) {
+                        recorded.lock().unwrap().push(kept);
+                    }
                 }
                 let _ = stream
                     .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")

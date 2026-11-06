@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::coherent;
 use super::discovery::discover_cdp_url;
 use crate::ca_bundle::CaBundle;
 
@@ -427,37 +428,13 @@ impl Default for LaunchOptions {
     }
 }
 
-const COHERENT_WINDOW_SIZE: (u32, u32) = (1920, 1080);
-
-/// A launch flag because a per-target CDP override misses a popup's first
-/// request and service workers, both measured against real Chromium.
-/// shortcut: no timeout, `--version` exits without a display; add one if a
-/// wrapper script ever hangs here.
-fn coherent_user_agent(chrome_path: &Path) -> Option<String> {
-    let output = Command::new(chrome_path).arg("--version").output().ok()?;
-    coherent_user_agent_for(&String::from_utf8_lossy(&output.stdout))
-}
-
-/// The reduced UA of a headed Chrome, which the headless one differs from only
-/// by its product name. No version means no flag: the headless UA beats a wrong one.
-/// shortcut: Linux token only, as in the pods; add the others if a desktop sets the flag.
-fn coherent_user_agent_for(version_output: &str) -> Option<String> {
-    let major = version_output.split_whitespace().find_map(|word| {
-        let (major, _) = word.split_once('.')?;
-        major.parse::<u32>().ok()
-    })?;
-    Some(format!(
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
-    ))
-}
-
-struct ChromeArgs {
-    args: Vec<String>,
+pub(super) struct ChromeArgs {
+    pub(super) args: Vec<String>,
     user_data_dir: PathBuf,
     temp_user_data_dir: Option<PathBuf>,
 }
 
-fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
+pub(super) fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
     // Chrome only honors the last --enable-features switch on the command
     // line, so every feature must be collected into a single flag.
     let mut enable_features: Vec<String> = vec![
@@ -593,24 +570,17 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
         .iter()
         .any(|a| a.starts_with("--start-maximized") || a.starts_with("--window-size="));
 
-    if options.coherent_fingerprint {
-        args.push("--disable-blink-features=AutomationControlled".to_string());
-    }
-
     if !has_window_size && effectively_headless {
         let default_size = if options.coherent_fingerprint {
-            COHERENT_WINDOW_SIZE
+            coherent::WINDOW_SIZE
         } else {
             (1280, 720)
         };
         let (w, h) = options.viewport_size.unwrap_or(default_size);
         args.push(format!("--window-size={},{}", w, h));
-        if options.coherent_fingerprint {
-            // Headless reports an 800x600 screen under any window without this.
-            args.push(format!("--screen-info={{{}x{}}}", w, h));
-        }
     }
 
+    args.extend(coherent::launch_args(options, &user_args));
     args.extend(user_args);
 
     if options.restrict_webrtc {
@@ -793,23 +763,14 @@ pub fn launch_chrome(options: &LaunchOptions) -> Result<ChromeProcess, String> {
         }
     }
 
-    let effective_options = resolved_options.as_ref().unwrap_or(options);
-
-    let coherent_options = effective_options.coherent_fingerprint.then(|| {
-        let mut opts = effective_options.clone();
-        // First, so an explicit --user-agent later in the list still wins.
-        if let Some(user_agent) = coherent_user_agent(&chrome_path) {
-            opts.args.insert(0, format!("--user-agent={user_agent}"));
-        }
-        opts
-    });
-    let effective_options = coherent_options.as_ref().unwrap_or(effective_options);
+    let mut effective_options = resolved_options.unwrap_or_else(|| options.clone());
+    coherent::add_user_agent(&mut effective_options, &chrome_path);
 
     let max_attempts = 3;
     let mut last_err = String::new();
 
     for attempt in 1..=max_attempts {
-        match try_launch_chrome(&chrome_path, effective_options) {
+        match try_launch_chrome(&chrome_path, &effective_options) {
             Ok(mut process) => {
                 // Transfer profile temp dir ownership to ChromeProcess for cleanup on Drop.
                 // The try_launch_chrome temp_user_data_dir is None here because we set profile
@@ -2201,59 +2162,6 @@ exec sleep 60
             .args
             .iter()
             .any(|a| a == "--user-data-dir=/tmp/my-profile"));
-    }
-
-    #[test]
-    fn test_coherent_user_agent_reads_the_major_version() {
-        for output in [
-            "Chromium 156.0.8078.79 Alpine Linux\n",
-            "Google Chrome for Testing 156.0.8078.79\n",
-        ] {
-            let user_agent = coherent_user_agent_for(output).unwrap();
-            assert!(user_agent.contains(" Chrome/156.0.0.0 "), "{user_agent}");
-            assert!(!user_agent.contains("Headless"), "{user_agent}");
-        }
-    }
-
-    #[test]
-    fn test_coherent_user_agent_needs_a_version() {
-        for output in ["", "Chromium", "Chromium v1.x"] {
-            assert_eq!(coherent_user_agent_for(output), None, "{output}");
-        }
-    }
-
-    #[test]
-    fn test_build_args_coherent_fingerprint_is_off_by_default() {
-        let args = build_chrome_args(&LaunchOptions::default()).unwrap().args;
-        assert!(!args.iter().any(|a| a.contains("AutomationControlled")));
-        assert!(!args.iter().any(|a| a.starts_with("--screen-info")));
-        assert!(args.iter().any(|a| a == "--window-size=1280,720"));
-    }
-
-    #[test]
-    fn test_build_args_coherent_fingerprint() {
-        let opts = LaunchOptions {
-            coherent_fingerprint: true,
-            ..Default::default()
-        };
-        let args = build_chrome_args(&opts).unwrap().args;
-        assert!(args
-            .iter()
-            .any(|a| a == "--disable-blink-features=AutomationControlled"));
-        assert!(args.iter().any(|a| a == "--window-size=1920,1080"));
-        assert!(args.iter().any(|a| a == "--screen-info={1920x1080}"));
-    }
-
-    #[test]
-    fn test_build_args_coherent_fingerprint_keeps_explicit_window() {
-        let opts = LaunchOptions {
-            coherent_fingerprint: true,
-            args: vec!["--window-size=800,600".to_string()],
-            ..Default::default()
-        };
-        let args = build_chrome_args(&opts).unwrap().args;
-        assert!(!args.iter().any(|a| a == "--window-size=1920,1080"));
-        assert!(!args.iter().any(|a| a.starts_with("--screen-info")));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 pub mod chrome;
 pub mod client;
+mod coherent;
 pub mod discovery;
 pub mod lightpanda;
 pub mod obscura;
