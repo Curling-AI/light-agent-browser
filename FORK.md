@@ -29,7 +29,7 @@ Upstream files carry small, self-contained hooks:
 - `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior). Upstream's `subscribe_methods` (#2110) does not replace it: its lossless taps only see broadcast events, and a private session's events never reach the broadcast
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
-- `cli/src/native/cdp/chrome.rs`: `coherent_fingerprint` option and its hooks in `build_chrome_args` and `launch_chrome`; `actions.rs` reads `AGENT_BROWSER_COHERENT_CHROME` in both launch paths; `doctor/chrome.rs` exposes `query_chrome_version`
+- `cli/src/native/cdp/chrome.rs`: `coherent_fingerprint` option and its hooks in `build_chrome_args` and `launch_chrome`; `actions.rs` reads `AGENT_BROWSER_COHERENT_CHROME` in both launch paths; `doctor/chrome.rs` exposes `query_chrome_version` and bounds its stdout read by the same deadline
 - `cli/src/install.rs`: `run_install` installs Lightpanda first; Chrome install moved to `install_chrome`
 - `cli/src/native/actions.rs`: `handle_tab_new` and `click --new-tab` refuse a second page on Lightpanda up front (`engine::second_page_error`), since Lightpanda serves one page per CDP connection
 - `cli/src/connection.rs`: `send_command` waits for the daemon to exit after a successful `close`, so the next command starts a fresh daemon (upstream #2134; drop this hook once upstream fixes it)

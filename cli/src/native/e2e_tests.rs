@@ -1143,10 +1143,13 @@ async fn e2e_coherent_chrome_never_requests_as_headless() {
             "{path} never loaded: {requests:?}"
         );
     }
-    assert!(
-        !requests.iter().any(|r| r.contains("HeadlessChrome")),
-        "a request declared headless: {requests:?}"
-    );
+    // Elsewhere the UA stays stock on purpose: coherent::add_user_agent.
+    if cfg!(target_os = "linux") {
+        assert!(
+            !requests.iter().any(|r| r.contains("HeadlessChrome")),
+            "a request declared headless: {requests:?}"
+        );
+    }
 }
 
 /// Records the paths a renderer requested from a loopback server.
