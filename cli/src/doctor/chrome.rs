@@ -144,7 +144,7 @@ const VERSION_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// leaves a process tree whose inherited stdout handle never closes, so the
 /// caller would wait forever.
 #[cfg(windows)]
-fn query_chrome_version(path: &Path) -> Option<String> {
+pub(crate) fn query_chrome_version(path: &Path) -> Option<String> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows_sys::Win32::Storage::FileSystem::{
@@ -205,7 +205,7 @@ fn query_chrome_version(path: &Path) -> Option<String> {
 }
 
 #[cfg(not(windows))]
-fn query_chrome_version(path: &Path) -> Option<String> {
+pub(crate) fn query_chrome_version(path: &Path) -> Option<String> {
     let mut cmd = std::process::Command::new(path);
     cmd.arg("--version");
     run_version_command(cmd, VERSION_QUERY_TIMEOUT)
@@ -226,6 +226,15 @@ fn run_version_command(
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
+
+    // A descendant can hold the pipe after the browser exits, so the read gets
+    // its own thread and the same deadline. The thread ends when the pipe closes.
+    let mut pipe = child.stdout.take()?;
+    let (sender, output) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = sender.send(pipe.read_to_string(&mut text).map(|_| text));
+    });
 
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
@@ -251,9 +260,13 @@ fn run_version_command(
         return None;
     }
 
-    let mut stdout = String::new();
-    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-    let s = stdout.trim().to_string();
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    let s = output
+        .recv_timeout(remaining)
+        .ok()?
+        .ok()?
+        .trim()
+        .to_string();
     if s.is_empty() {
         None
     } else {
@@ -283,6 +296,21 @@ mod tests {
             assert!(s.contains(".cache"));
             assert!(s.ends_with("puppeteer"));
         }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn version_query_gives_up_on_a_child_holding_the_pipe_after_exit() {
+        use std::time::{Duration, Instant};
+
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c").arg("echo Chromium 1.0; sleep 5 &");
+
+        let started = Instant::now();
+        let result = run_version_command(cmd, Duration::from_millis(300));
+
+        assert!(result.is_none());
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[cfg(not(windows))]

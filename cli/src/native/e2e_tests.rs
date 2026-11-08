@@ -1088,8 +1088,84 @@ async fn e2e_lightpanda_auto_launch_can_open_page() {
     assert_eq!(get_data(&resp)["closed"], true);
 }
 
+/// Anti-bot checks read the first request of a page, and a popup's goes out
+/// before the daemon can attach to it, so a per-target override would miss it.
+#[tokio::test]
+#[ignore]
+async fn e2e_coherent_chrome_never_requests_as_headless() {
+    let env = EnvGuard::new(&["AGENT_BROWSER_COHERENT_CHROME"]);
+    env.set("AGENT_BROWSER_COHERENT_CHROME", "1");
+
+    let (port, requests) = spawn_request_recorder(|request| Some(request.to_string())).await;
+
+    let mut state = DaemonState::new();
+    let url = format!("http://127.0.0.1:{port}/");
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": url }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_evaluate(&mut state, "3", "navigator.webdriver", json!(false)).await;
+    assert_evaluate(&mut state, "4", "screen.width", json!(1920)).await;
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "tab_new", "url": format!("{url}tab") }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let popup = format!("window.open('{url}popup'); 1");
+    assert_evaluate(&mut state, "6", &popup, json!(1)).await;
+    for _ in 0..50 {
+        let loaded = requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("GET /popup "));
+        if loaded {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let resp = execute_command(&json!({ "id": "7", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+
+    let requests = requests.lock().unwrap();
+    for path in ["GET /tab ", "GET /popup "] {
+        assert!(
+            requests.iter().any(|r| r.starts_with(path)),
+            "{path} never loaded: {requests:?}"
+        );
+    }
+    // Elsewhere the UA stays stock on purpose: coherent::add_user_agent.
+    if cfg!(target_os = "linux") {
+        assert!(
+            !requests.iter().any(|r| r.contains("HeadlessChrome")),
+            "a request declared headless: {requests:?}"
+        );
+    }
+}
+
 /// Records the paths a renderer requested from a loopback server.
 async fn spawn_hit_recorder() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    // Speculative preconnects open and close without a request.
+    spawn_request_recorder(|request| {
+        let line = request.lines().next()?;
+        line.split_whitespace().nth(1).map(str::to_string)
+    })
+    .await
+}
+
+/// Records what `record` keeps of each request a loopback server received.
+async fn spawn_request_recorder(
+    record: fn(&str) -> Option<String>,
+) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -1101,16 +1177,12 @@ async fn spawn_hit_recorder() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<Strin
             // One task per connection: an idle preconnect must not hold up
             // the requests behind it.
             tokio::spawn(async move {
-                let mut buf = [0u8; 2048];
+                let mut buf = [0u8; 4096];
                 let n = stream.read(&mut buf).await.unwrap_or(0);
-                let line = String::from_utf8_lossy(&buf[..n])
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .to_string();
-                // Speculative preconnects open and close without a request.
-                if let Some(path) = line.split_whitespace().nth(1) {
-                    recorded.lock().unwrap().push(path.to_string());
+                if n > 0 {
+                    if let Some(kept) = record(&String::from_utf8_lossy(&buf[..n])) {
+                        recorded.lock().unwrap().push(kept);
+                    }
                 }
                 let _ = stream
                     .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")

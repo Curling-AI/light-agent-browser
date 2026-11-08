@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::coherent;
 use super::discovery::discover_cdp_url;
 use crate::ca_bundle::CaBundle;
 
@@ -374,6 +375,9 @@ pub struct LaunchOptions {
     /// Restrict WebRTC to proxied transports so direct UDP cannot bypass the
     /// HTTP domain filter. Enabled automatically with `--allowed-domains`.
     pub restrict_webrtc: bool,
+    /// Drop what only an automated Chrome emits: the headless UA, the automation
+    /// flag and the small default window. `AGENT_BROWSER_COHERENT_CHROME` turns it on.
+    pub coherent_fingerprint: bool,
 }
 
 impl LaunchOptions {
@@ -419,17 +423,18 @@ impl Default for LaunchOptions {
             webmcp: true,
             no_xvfb: false,
             restrict_webrtc: false,
+            coherent_fingerprint: false,
         }
     }
 }
 
-struct ChromeArgs {
-    args: Vec<String>,
+pub(super) struct ChromeArgs {
+    pub(super) args: Vec<String>,
     user_data_dir: PathBuf,
     temp_user_data_dir: Option<PathBuf>,
 }
 
-fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
+pub(super) fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
     // Chrome only honors the last --enable-features switch on the command
     // line, so every feature must be collected into a single flag.
     let mut enable_features: Vec<String> = vec![
@@ -566,10 +571,16 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
         .any(|a| a.starts_with("--start-maximized") || a.starts_with("--window-size="));
 
     if !has_window_size && effectively_headless {
-        let (w, h) = options.viewport_size.unwrap_or((1280, 720));
+        let default_size = if options.coherent_fingerprint {
+            coherent::WINDOW_SIZE
+        } else {
+            (1280, 720)
+        };
+        let (w, h) = options.viewport_size.unwrap_or(default_size);
         args.push(format!("--window-size={},{}", w, h));
     }
 
+    args.extend(coherent::launch_args(options, &user_args));
     args.extend(user_args);
 
     if options.restrict_webrtc {
@@ -752,13 +763,14 @@ pub fn launch_chrome(options: &LaunchOptions) -> Result<ChromeProcess, String> {
         }
     }
 
-    let effective_options = resolved_options.as_ref().unwrap_or(options);
+    let mut effective_options = resolved_options.unwrap_or_else(|| options.clone());
+    coherent::add_user_agent(&mut effective_options, &chrome_path);
 
     let max_attempts = 3;
     let mut last_err = String::new();
 
     for attempt in 1..=max_attempts {
-        match try_launch_chrome(&chrome_path, effective_options) {
+        match try_launch_chrome(&chrome_path, &effective_options) {
             Ok(mut process) => {
                 // Transfer profile temp dir ownership to ChromeProcess for cleanup on Drop.
                 // The try_launch_chrome temp_user_data_dir is None here because we set profile

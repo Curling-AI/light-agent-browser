@@ -4696,6 +4696,7 @@ fn launch_options_from_env() -> LaunchOptions {
             Ok("1" | "true" | "yes")
         ),
         no_xvfb: no_xvfb_from_env(),
+        coherent_fingerprint: coherent_fingerprint_from_env(),
         restrict_webrtc: env::var("AGENT_BROWSER_ALLOWED_DOMAINS")
             .is_ok_and(|domains| !domains.trim().is_empty()),
     }
@@ -4729,6 +4730,15 @@ fn webgpu_from_launch_cmd(cmd: &Value) -> bool {
     cmd.get("webgpu")
         .and_then(|v| v.as_bool())
         .unwrap_or_else(webgpu_from_env)
+}
+
+/// Pod-level rollout switch, so it never travels on a launch command: a value
+/// that differs from the running browser's would make the daemon relaunch it.
+fn coherent_fingerprint_from_env() -> bool {
+    matches!(
+        env::var("AGENT_BROWSER_COHERENT_CHROME").as_deref(),
+        Ok("1" | "true" | "yes")
+    )
 }
 
 fn no_xvfb_from_env() -> bool {
@@ -5223,6 +5233,7 @@ async fn handle_launch_inner(cmd: &Value, state: &mut DaemonState) -> Result<Val
                 )
             }),
         no_xvfb: no_xvfb_from_launch_cmd(cmd),
+        coherent_fingerprint: coherent_fingerprint_from_env(),
         restrict_webrtc,
     };
     if engine.as_deref() == Some("obscura") {

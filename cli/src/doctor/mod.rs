@@ -8,7 +8,7 @@
 //! repairs (reinstalling Chrome, purging old state files, generating a
 //! missing encryption key) are gated behind `--fix`.
 
-mod chrome;
+pub(crate) mod chrome;
 mod config;
 mod daemon;
 mod environment;

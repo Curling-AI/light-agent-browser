@@ -1459,6 +1459,12 @@ On Linux hosts with no display (servers, containers), `--headed` still works: wh
 
 > **Note:** Browser extensions work in both headed and headless mode (Chrome's `--headless=new`).
 
+## Coherent Chrome
+
+`AGENT_BROWSER_COHERENT_CHROME=1` launches Chrome without the headless markers: `navigator.webdriver`, the 800x600 screen and, on headless Linux only, the `HeadlessChrome` User-Agent. The daemon reads it from its environment, so it never relaunches a running browser. An explicit `--user-agent` or `--screen-info` still wins, and the screen follows an explicit window size.
+
+It only changes how Chrome launches and does not select Chrome: a session on Lightpanda stays there until it moves to Chrome.
+
 ## WebGPU
 
 Headless Chrome does not expose WebGPU by default, so pages using it (three.js `WebGPURenderer`, Babylon.js, etc.) silently render black. The `--webgpu` flag enables a launch preset that makes WebGPU work, including in GPU-less containers and CI:
