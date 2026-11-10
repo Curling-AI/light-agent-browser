@@ -1,8 +1,19 @@
 # light-agent-browser
 
-## 0.39.6
+## 0.39.7
 
 <!-- release:start -->
+### New Features
+
+- **Coherent Chrome (`AGENT_BROWSER_COHERENT_CHROME=1`)** - Off by default. With the variable set, Chrome launches without the markers that give headless away to anti-bot checks: the Linux headless User-Agent drops `HeadlessChrome` (set with `--user-agent` at launch, so popups and service workers get it too), and the screen matches the window through `--screen-info`, sized from the last explicit `--window-size`, else the viewport, else 1920x1080. Flags the user passes still win. macOS and Windows keep the stock User-Agent, since a Linux one would contradict `navigator.platform` (#24)
+
+### Bug Fixes
+
+- Fixed **the Chrome version query hanging when a launcher leaves a child holding stdout** - the read now runs under the same 10s deadline as the process, in `doctor` too, and Chrome launches with its stock User-Agent when no version comes back (#24)
+<!-- release:end -->
+
+## 0.39.6
+
 ### New Features
 
 - **`file://` pages on Lightpanda** - Lightpanda refuses every scheme but http(s), so opening a local file used to relaunch the session with Chrome. `open file:///path/page.html` now stays on Lightpanda: the daemon serves the page, its scripts, stylesheets, images, links, and folder listings from disk through a reserved host (`http://file.agent-browser.invalid/...`) that never leaves the machine, and `open`, `get url`, `back`, and `tab list` show the `file://` URL. Pages can only load files from the folders the session opened (403 elsewhere, `..` and symlinks resolved first); `--allow-file-access` lifts that limit and no longer forces Chrome. Screenshots and PDFs of local pages read their stylesheets and images from the same folders. Local `.pdf` files still relaunch with Chrome, since Lightpanda has no PDF viewer (#20)
@@ -23,7 +34,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.5
 

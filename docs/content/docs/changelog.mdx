@@ -3,6 +3,18 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.39.7
+
+<p className="text-[#888] text-sm">November 10, 2026</p>
+
+### New Features
+
+- **Coherent Chrome (`AGENT_BROWSER_COHERENT_CHROME=1`)** - Off by default. With the variable set, Chrome launches without the markers that give headless away to anti-bot checks: the Linux headless User-Agent drops `HeadlessChrome` (set with `--user-agent` at launch, so popups and service workers get it too), and the screen matches the window through `--screen-info`, sized from the last explicit `--window-size`, else the viewport, else 1920x1080. Flags the user passes still win. macOS and Windows keep the stock User-Agent, since a Linux one would contradict `navigator.platform` (#24)
+
+### Bug Fixes
+
+- Fixed **the Chrome version query hanging when a launcher leaves a child holding stdout** - the read now runs under the same 10s deadline as the process, in `doctor` too, and Chrome launches with its stock User-Agent when no version comes back (#24)
+
 ## v0.39.6
 
 <p className="text-[#888] text-sm">October 23, 2026</p>
