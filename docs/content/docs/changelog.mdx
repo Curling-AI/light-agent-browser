@@ -3,6 +3,22 @@ title: "Changelog"
 navTitle: "Changelog"
 ---
 
+## v0.40.0
+
+<p className="text-[#888] text-sm">November 19, 2026</p>
+
+### Bug Fixes
+
+- Fixed **a false outdated-Chrome warning on every Lightpanda session** - Upstream's new check compares the browser's reported version with Chrome's stable release. Lightpanda reports a fixed `Chrome/124` product, so each Lightpanda session warned about hundreds of CVEs that do not apply to it. Lightpanda sessions are no longer checked; Chrome sessions still are (#26)
+
+### Improvements
+
+- **Upstream sync** - Merged upstream agent-browser v0.40.0 through v0.43.0 and the fixes published after it with a merge commit (#26). Highlights: saved flows (experimental) record a task once and replay its requests (#2236), unknown command flags are rejected (#2665), `click` and `dblclick` take `--button` and `--modifiers` (#2594), `select` drives custom ARIA comboboxes (#2592), `tab keep live` and `tab keep frozen` control background tabs (#2624, #2627), each session gets one daemon under a spawn lock (#2648), the daemon decides session reuse and relaunch in one place (#2396), and Chrome sessions warn when the browser is behind stable with later CVE fixes (#2309)
+- **Packaging** - Upstream now publishes its binaries as `@agent-browser/cli-*` npm packages (#2150). light-agent-browser keeps bundling every platform binary in its own package. With upstream's new launcher, the global `agent-browser` command links to the native binary on its first run when the package manager blocks install scripts, as npm 12, pnpm, and Bun do by default (#26)
+- **Core skill and README** - Both follow upstream's shorter layout and keep the Lightpanda guidance: stay on Lightpanda, one page per session, `file://` pages, and the screenshot renderer (#26)
+
+---
+
 ## v0.39.7
 
 <p className="text-[#888] text-sm">November 10, 2026</p>
