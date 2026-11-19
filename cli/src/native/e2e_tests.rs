@@ -1117,6 +1117,64 @@ async fn e2e_lightpanda_launch_can_open_page() {
     assert_eq!(get_data(&resp)["closed"], true);
 }
 
+/// Lightpanda has no `DOM.getNodeForLocation`, so a ref click confirms its
+/// receiver through `document.elementFromPoint` (page_hit_test.rs).
+#[tokio::test]
+#[ignore]
+async fn e2e_lightpanda_click_ref() {
+    let lightpanda_bin = match std::env::var("LIGHTPANDA_BIN") {
+        Ok(path) if !path.is_empty() => path,
+        _ => return,
+    };
+    let (base_url, _server) = start_link_fixture_server().await;
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true, "engine": "lightpanda", "executablePath": lightpanda_bin }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": base_url }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    let resp = execute_command(&json!({ "id": "3", "action": "snapshot" }), &mut state).await;
+    assert_success(&resp);
+    let snapshot = get_data(&resp)["snapshot"].as_str().unwrap();
+    let line = snapshot
+        .lines()
+        .find(|line| line.contains("link \"Next page\""))
+        .unwrap_or_else(|| panic!("no link ref in snapshot: {snapshot}"));
+    let ref_id = line
+        .split("ref=")
+        .nth(1)
+        .and_then(|rest| rest.split([']', ',']).next())
+        .unwrap();
+
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "click", "selector": format!("@{ref_id}") }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    let resp = execute_command(&json!({ "id": "5", "action": "url" }), &mut state).await;
+    assert_success(&resp);
+    let url = get_data(&resp)["url"].as_str().unwrap();
+    assert!(
+        url.ends_with("/next"),
+        "should have navigated to /next, got {url}"
+    );
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
 #[tokio::test]
 #[ignore]
 async fn e2e_lightpanda_auto_launch_can_open_page() {

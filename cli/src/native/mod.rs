@@ -32,6 +32,8 @@ pub mod inspect_server;
 pub mod interaction;
 #[allow(dead_code)]
 pub mod network;
+// Fork: fallback hit test for Lightpanda ref clicks.
+pub mod page_hit_test;
 #[allow(dead_code)]
 pub mod pointer;
 #[allow(dead_code)]
