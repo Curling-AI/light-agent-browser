@@ -18,6 +18,7 @@ New behavior is isolated in fork-only files so upstream merges rarely conflict:
 - `cli/src/native/render/`: DOM serialization, local Chrome renderer, remote client, and the `renderer serve` HTTP service; `callers.rs` verifies per-caller HMAC tokens and admits renders under per-caller limits; `metrics.rs` serves `/metrics`; `live.rs` decides and runs live captures in a short-lived local Chrome; `guard.rs` holds the untrusted-input policy the service enforces (scripts off, public http(s) subresources only)
 - `cli/src/native/file_url.rs`: `file://` pages on Lightpanda (URL mapping, allowed folders, serving files through `Fetch`)
 - `cli/src/native/cdp/coherent.rs`: Chrome without the headless markers (User-Agent, automation flag, screen)
+- `cli/src/native/page_hit_test.rs`: names the element a ref click would reach through `document.elementFromPoint` in an isolated world, for browsers without `DOM.getNodeForLocation` (Lightpanda)
 - `cli/src/lightpanda_install.rs`: Lightpanda download for `install`
 - `docker/renderer/`: renderer container image and Kubernetes example
 - `FORK.md`: this file
@@ -26,6 +27,7 @@ Upstream files carry small, self-contained hooks:
 
 - `cli/src/native/actions.rs`: engine resolution in `auto_launch_inner` (the only local launch path since upstream routed `launch` through the session settings, #2387 and #2396), `engine_is_default`/`force_chrome` state and the local `.pdf` relaunch in `handle_navigate` (its `auto_launch` is boxed, or a confirmed navigate overflows the test stack), `file_urls` state (recorded `--allow-file-access` at launch, cleared on `close`, reserved URL in `handle_navigate` and `handle_tab_new`, reserved-host requests served first in the `Fetch` handler, its pattern in `build_fetch_patterns`, `session_setup_pending`, and `apply_session_setup`, and `file://` shown in every response through `execute_command`), `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
 - `cli/src/native/mod.rs`: module registration
+- `cli/src/native/click_point.rs`: `hit_test` falls back to `page_hit_test::element_at_point` when the browser does not implement `DOM.getNodeForLocation`. Upstream confirms every ref click with that method (#2611), and without the fallback `click`, `dblclick`, `hover`, and `check` on a ref fail on Lightpanda
 - `cli/src/native/browser.rs`: `validate_lightpanda_options` accepts `--allow-file-access`
 - `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior). Upstream's `subscribe_methods` (#2110) does not replace it: its lossless taps only see broadcast events, and a private session's events never reach the broadcast
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
@@ -50,7 +52,7 @@ Upstream files carry small, self-contained hooks:
 - `test/launcher.test.mjs`: a pnpm shim test under the `light-agent-browser` package directory
 - Documentation: `README.md` (upstream's short README with the fork's sections), `skill-data/core/`, `docs/content/docs/`
 
-The upstream e2e suite assumes Chrome without naming an engine, so test builds resolve an unset engine to Chrome (see `resolve_launch_engine`). Fork behavior is covered by unit tests in `engine.rs`, `file_url.rs`, and `render/` and by `e2e_lightpanda_screenshot_renderers` and `e2e_lightpanda_opens_file_urls`.
+The upstream e2e suite assumes Chrome without naming an engine, so test builds resolve an unset engine to Chrome (see `resolve_launch_engine`). Fork behavior is covered by unit tests in `engine.rs`, `file_url.rs`, and `render/` and by `e2e_lightpanda_screenshot_renderers`, `e2e_lightpanda_opens_file_urls`, and `e2e_lightpanda_click_ref`.
 
 ## Syncing with upstream
 
@@ -69,6 +71,7 @@ When resolving conflicts, keep upstream's version of a hunk and re-apply the for
 - add a Chrome-only launch option (add it to `engine::chrome_only_option`)
 - add a new screenshot or PDF entry point (route it through `render::capture_screenshot` or `render::capture_pdf`)
 - change `install.rs` or the Lightpanda launcher
+- call a CDP method Lightpanda does not implement on a common path such as clicking, typing, or snapshots. `cargo test` and CI run Chrome only, so run the Lightpanda e2e tests above before merging a sync
 - change the npm packaging (`bin/agent-browser.js`, `scripts/native.js`, `scripts/link-native.js`, `scripts/postinstall.js`, `release.yml`), which must keep finding the binary in this package's `bin/`
 
 Upstream release commits conflict in the version files (`package.json`, `cli/Cargo.toml`, `cli/Cargo.lock`, `packages/*`) and in both changelogs. Never resolve them by taking upstream's whole file (`git checkout --theirs`): `package.json` and `cli/Cargo.toml` carry the fork's identity (npm name `light-agent-browser`, repository, homepage, description, keywords), and a release with upstream's name would try to publish `agent-browser`. Take only the version lines, then check that `git diff origin/main -- package.json cli/Cargo.toml` changes nothing but the version. In `CHANGELOG.md`, keep exactly one `release:start`/`release:end` pair, around the fork's entry for the release.

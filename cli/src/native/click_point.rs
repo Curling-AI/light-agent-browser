@@ -232,7 +232,7 @@ async fn hit_test(
             point.x, point.y, target, detail
         )
     };
-    let hit = client
+    let hit = match client
         .send_command(
             "DOM.getNodeForLocation",
             Some(serde_json::json!({
@@ -244,7 +244,21 @@ async fn hit_test(
             Some(session),
         )
         .await
-        .map_err(|error| refusal(&error.to_string()))?;
+    {
+        Ok(hit) => hit,
+        // Fork: Lightpanda lacks this method; see page_hit_test.rs.
+        Err(error) if super::page_hit_test::node_for_location_unsupported(&error) => {
+            let (backend_node_id, frame_id) =
+                super::page_hit_test::element_at_point(client, session, point.x, point.y)
+                    .await
+                    .map_err(|error| refusal(&error))?;
+            return Ok(Receiver {
+                backend_node_id,
+                frame_id,
+            });
+        }
+        Err(error) => return Err(refusal(&error)),
+    };
     let frame_id = hit
         .get("frameId")
         .and_then(Value::as_str)
