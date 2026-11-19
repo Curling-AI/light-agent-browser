@@ -9,11 +9,15 @@ pub mod browser;
 #[allow(dead_code)]
 pub mod cdp;
 #[allow(dead_code)]
+pub mod click_point;
+#[allow(dead_code)]
 pub mod cookies;
 #[allow(dead_code)]
 pub mod daemon;
 #[allow(dead_code)]
 pub mod diff;
+#[allow(dead_code)]
+pub mod downloads;
 #[allow(dead_code)]
 pub mod element;
 #[allow(dead_code)]
@@ -21,11 +25,15 @@ pub mod engine;
 #[allow(dead_code)]
 pub mod file_url;
 #[allow(dead_code)]
+pub mod flow;
+#[allow(dead_code)]
 pub mod inspect_server;
 #[allow(dead_code)]
 pub mod interaction;
 #[allow(dead_code)]
 pub mod network;
+#[allow(dead_code)]
+pub mod pointer;
 #[allow(dead_code)]
 pub mod policy;
 #[allow(dead_code)]
