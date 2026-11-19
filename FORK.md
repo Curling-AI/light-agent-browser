@@ -8,6 +8,7 @@ This fork of [vercel-labs/agent-browser](https://github.com/vercel-labs/agent-br
 - **Install.** `agent-browser install` downloads Lightpanda. `--with-chrome` and `--with-deps` add Chrome; `--engine chrome install` is the upstream behavior.
 - **Screenshots and PDFs.** Lightpanda pages are rendered by Chrome from a serialized DOM, either in-process or through `agent-browser renderer serve` (`--screenshot-renderer`).
 - **Local files.** Lightpanda only speaks http(s), so `file://` pages are served to it from disk through a reserved host (`http://file.agent-browser.invalid/...`), limited to the folders the session opened unless `--allow-file-access` is set. A local `.pdf` still relaunches the session with Chrome.
+- **Packaging.** Upstream publishes each native binary as an `@agent-browser/cli-*` npm package (#2150). That scope is upstream's, so `light-agent-browser` keeps bundling all seven binaries in its own `bin/`, where the upstream launcher looks first. The `packages/@agent-browser/cli-*` folders stay in the tree, unpublished, so upstream release commits merge cleanly; `version:sync` keeps their versions aligned.
 
 ## Where the code lives
 
@@ -23,23 +24,31 @@ New behavior is isolated in fork-only files so upstream merges rarely conflict:
 
 Upstream files carry small, self-contained hooks:
 
-- `cli/src/native/actions.rs`: engine resolution in the two local launch paths, `engine_is_default`/`force_chrome` state and the local `.pdf` relaunch in `handle_navigate`, `file_urls` state (recorded `--allow-file-access` at both launch paths, cleared on `close`, reserved URL in `handle_navigate` and `handle_tab_new`, reserved-host requests served first in the `Fetch` handler, its pattern in `build_fetch_patterns`, `session_setup_pending`, and `apply_session_setup`, and `file://` shown in every response through `execute_command`), `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
+- `cli/src/native/actions.rs`: engine resolution in `auto_launch_inner` (the only local launch path since upstream routed `launch` through the session settings, #2387 and #2396), `engine_is_default`/`force_chrome` state and the local `.pdf` relaunch in `handle_navigate` (its `auto_launch` is boxed, or a confirmed navigate overflows the test stack), `file_urls` state (recorded `--allow-file-access` at launch, cleared on `close`, reserved URL in `handle_navigate` and `handle_tab_new`, reserved-host requests served first in the `Fetch` handler, its pattern in `build_fetch_patterns`, `session_setup_pending`, and `apply_session_setup`, and `file://` shown in every response through `execute_command`), `rendererReason` in screenshot and pdf responses, `pending_launch_warning` and `screenshot_renderer` state, screenshot and diff screenshot routed through `render::capture_screenshot`, `pdf` routed through `render::capture_pdf`, renderer shutdown on `close`, and `handle_launch_with_deadline` boxing the launch future (with the fork's hooks it overflows a 2 MB stack in debug builds)
 - `cli/src/native/mod.rs`: module registration
 - `cli/src/native/browser.rs`: `validate_lightpanda_options` accepts `--allow-file-access`
 - `cli/src/native/cdp/client.rs`: `subscribe_session_with_buffer`, so the renderer's request gate gets a buffer that does not drop `Fetch.requestPaused` (`subscribe_session` keeps the upstream 16-event, drop-newest behavior). Upstream's `subscribe_methods` (#2110) does not replace it: its lossless taps only see broadcast events, and a private session's events never reach the broadcast
 - `cli/src/native/cdp/lightpanda.rs`: `find_lightpanda` also checks the install directory
 - `cli/src/native/cdp/chrome.rs`: the "Chrome cache directory" warning ignores Lightpanda entries
-- `cli/src/native/cdp/chrome.rs`: `coherent_fingerprint` option and its hooks in `build_chrome_args` and `launch_chrome`; `actions.rs` reads `AGENT_BROWSER_COHERENT_CHROME` in both launch paths; `doctor/chrome.rs` exposes `query_chrome_version` and bounds its stdout read by the same deadline
+- `cli/src/native/cdp/chrome.rs`: `coherent_fingerprint` option and its hooks in `build_chrome_args` and `launch_chrome`; `actions.rs` reads `AGENT_BROWSER_COHERENT_CHROME` in `auto_launch_inner`; `session_settings/running.rs` sets the field to `false` in `launch_options`; `doctor/chrome.rs` exposes `query_chrome_version` and bounds its stdout read by the same deadline
 - `cli/src/install.rs`: `run_install` installs Lightpanda first; Chrome install moved to `install_chrome`
+- `cli/src/native/actions.rs`: `warn_if_browser_outdated` skips Lightpanda (`engine::skips_chrome_version_check`), whose `Browser.getVersion` reports a fixed Chrome product
 - `cli/src/native/actions.rs`: `handle_tab_new` and `click --new-tab` refuse a second page on Lightpanda up front (`engine::second_page_error`), since Lightpanda serves one page per CDP connection
 - `cli/src/connection.rs`: `send_command` waits for the daemon to exit after a successful `close`, so the next command starts a fresh daemon (upstream #2134; drop this hook once upstream fixes it)
 - `cli/src/main.rs`: `renderer` command, install flags, launch warning printed on stderr
 - `cli/src/output.rs`: response warnings printed for every action, help text
-- `cli/src/flags.rs`, `cli/src/commands.rs`, `cli/src/mcp.rs`, `agent-browser.schema.json`: `--screenshot-renderer` plumbing, per-command `rendererToken` forwarding, and MCP parity; the MCP tools' `renderer` argument rejects renderer URLs (`mcp_renderer`), which, like the network flags upstream rejects in `extraArgs` (#2181), only the server's environment or config may set
-- `cli/src/native/actions.rs` also strips `rendererToken` from dashboard command broadcasts
+- `cli/src/flags.rs`, `cli/src/commands.rs`, `cli/src/mcp.rs`, `agent-browser.schema.json`: `--screenshot-renderer` plumbing, per-command `rendererToken` forwarding, and MCP parity; the MCP tools' `renderer` argument rejects renderer URLs (`mcp_renderer`), which, like the network flags upstream rejects in `extraArgs` (#2181), only the server's environment or config may set. `--screenshot-renderer` is in `MCP_TOOL_GLOBALS`, so the screenshot, pdf, and diff screenshot tools may pass it while `extraArgs` still may not
+- `packages/@agent-browser/sandbox/mcp-tools.json`: the MCP tool catalog snapshot includes the fork's tool arguments. On a conflict, regenerate it with `pnpm mcp-tools:sync`
+- `cli/src/native/actions.rs` also lists `rendererToken` in `ENVELOPE_KEYS`, so dashboard broadcasts and recorded flows drop it
 - `cli/tests/tls_cli.rs`: the Chrome manifest trust test runs `--engine chrome install`
-- `scripts/postinstall.js`: install reminder mentions Lightpanda
-- Documentation: `README.md`, `skill-data/core/`, `docs/content/docs/`
+- `scripts/postinstall.js`: install reminder mentions Lightpanda, and the download fallback uses the fork's GitHub releases
+- `package.json`: `files` ships all of `bin/`, and there are no `optionalDependencies` on the `@agent-browser/cli-*` packages
+- `scripts/link-native.js`: accepts `light-agent-browser` as the package directory for pnpm shims and Windows shims
+- `scripts/check-version-sync.js`: skips the check that `package.json` lists every `@agent-browser/cli-*` package
+- `.github/workflows/release.yml`: moves the binaries into `bin/` and verifies them instead of staging and publishing the platform packages; publishes as `light-agent-browser` and never publishes the `@agent-browser` scope
+- `.github/workflows/ci.yml`: the global install job packs `light-agent-browser` with the binary in `bin/`
+- `test/launcher.test.mjs`: a pnpm shim test under the `light-agent-browser` package directory
+- Documentation: `README.md` (upstream's short README with the fork's sections), `skill-data/core/`, `docs/content/docs/`
 
 The upstream e2e suite assumes Chrome without naming an engine, so test builds resolve an unset engine to Chrome (see `resolve_launch_engine`). Fork behavior is covered by unit tests in `engine.rs`, `file_url.rs`, and `render/` and by `e2e_lightpanda_screenshot_renderers` and `e2e_lightpanda_opens_file_urls`.
 
@@ -56,10 +65,11 @@ LIGHTPANDA_BIN=~/.agent-browser/browsers/lightpanda-1.0.0/lightpanda \
 
 When resolving conflicts, keep upstream's version of a hunk and re-apply the fork hook listed above. Pay attention to upstream changes that:
 
-- add a new launch path in `actions.rs` (it needs the same `engine::resolve_launch_engine` call)
+- add a new launch path in `actions.rs` (it needs the same `engine::resolve_launch_engine` call as `auto_launch_inner`)
 - add a Chrome-only launch option (add it to `engine::chrome_only_option`)
 - add a new screenshot or PDF entry point (route it through `render::capture_screenshot` or `render::capture_pdf`)
 - change `install.rs` or the Lightpanda launcher
+- change the npm packaging (`bin/agent-browser.js`, `scripts/native.js`, `scripts/link-native.js`, `scripts/postinstall.js`, `release.yml`), which must keep finding the binary in this package's `bin/`
 
 Upstream release commits conflict in the version files (`package.json`, `cli/Cargo.toml`, `cli/Cargo.lock`, `packages/*`) and in both changelogs. Never resolve them by taking upstream's whole file (`git checkout --theirs`): `package.json` and `cli/Cargo.toml` carry the fork's identity (npm name `light-agent-browser`, repository, homepage, description, keywords), and a release with upstream's name would try to publish `agent-browser`. Take only the version lines, then check that `git diff origin/main -- package.json cli/Cargo.toml` changes nothing but the version. In `CHANGELOG.md`, keep exactly one `release:start`/`release:end` pair, around the fork's entry for the release.
 

@@ -281,6 +281,9 @@ jobs:
         with:
           path: artifacts/
 
+      # Fork: the binaries ship inside light-agent-browser's bin/. The
+      # @agent-browser/cli-* platform packages belong to upstream's npm scope
+      # and are never published from here (see FORK.md).
       - name: Move binaries to bin directory
         if: needs.check-release.outputs.should_release == 'true'
         run: |

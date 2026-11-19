@@ -156,8 +156,24 @@ pub fn second_page_error(engine: &str, open_pages: usize) -> Option<String> {
     })
 }
 
+/// Lightpanda answers `Browser.getVersion` with a fixed Chrome product string
+/// that says nothing about its own security fixes, so the outdated-Chrome check
+/// would warn about CVEs that do not apply.
+pub fn skips_chrome_version_check(engine: &str) -> bool {
+    engine.eq_ignore_ascii_case(DEFAULT_ENGINE)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_chrome_engines_get_the_outdated_chrome_check() {
+        use super::skips_chrome_version_check;
+        assert!(skips_chrome_version_check("lightpanda"));
+        assert!(skips_chrome_version_check("Lightpanda"));
+        assert!(!skips_chrome_version_check("chrome"));
+        assert!(!skips_chrome_version_check("obscura"));
+    }
+
     #[test]
     fn empty_engine_counts_as_unset() {
         use super::is_unset;
