@@ -1,8 +1,19 @@
 # light-agent-browser
 
-## 0.40.0
+## 0.40.1
 
 <!-- release:start -->
+### Bug Fixes
+
+- Fixed **`click`, `dblclick`, `hover`, and `check` on a ref failing on Lightpanda** - The upstream sync in 0.40.0 brought a check that confirms each ref click with the browser before pressing (vercel-labs/agent-browser#2611). It relies on `DOM.getNodeForLocation`, which Lightpanda does not implement, so these commands failed with `Cannot confirm which element would receive a click` from the CLI and from MCP. On browsers without that method, the check now uses `document.elementFromPoint` in an isolated world, which names the same element Lightpanda delivers the press to. Commands that take a CSS selector were not affected (#29)
+
+### Contributors
+
+- @m4n3z40
+<!-- release:end -->
+
+## 0.40.0
+
 ### Bug Fixes
 
 - Fixed **a false outdated-Chrome warning on every Lightpanda session** - Upstream's new check compares the browser's reported version with Chrome's stable release. Lightpanda reports a fixed `Chrome/124` product, so each Lightpanda session warned about hundreds of CVEs that do not apply to it. Lightpanda sessions are no longer checked; Chrome sessions still are (#26)
@@ -16,7 +27,6 @@
 ### Contributors
 
 - @m4n3z40
-<!-- release:end -->
 
 ## 0.39.7
 
